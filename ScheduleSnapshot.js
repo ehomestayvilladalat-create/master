@@ -428,20 +428,6 @@ function ssDecodePartV320_(text) {
   try { return decodeURIComponent(String(text || "")); } catch (ignore) { return String(text || ""); }
 }
 
-function ssEncodeNightCellV320_(result) {
-  result = result || {};
-  if (result.available === false) return "B";
-  if (result.available !== true) return "E|" + ssEncodePartV320_("UNKNOWN_RESULT");
-  var n = result.nightlyPrices && result.nightlyPrices[0] ? result.nightlyPrices[0] : {};
-  var price = n.price === null || n.price === undefined ? "" : String(Number(n.price));
-  return [
-    "F",
-    price,
-    ssEncodePartV320_(n.sheet || ""),
-    ssEncodePartV320_(n.cell || ""),
-    ssEncodePartV320_(n.sourceLink || "")
-  ].join("|");
-}
 
 function ssDecodeNightCellV320_(text) {
   text = String(text || "");
@@ -461,24 +447,6 @@ function ssDecodeNightCellV320_(text) {
   };
 }
 
-function ssQueueScheduleSourceV320_(source, reason) {
-  source = source || {};
-  var sh = ssEnsureScheduleQueueSheetV320_();
-  var key = ssScheduleSourceKeyV320_(source);
-  var values = sh.getDataRange().getDisplayValues();
-  var now = new Date().toISOString();
-  for (var r = 1; r < values.length; r++) {
-    if (String(values[r][0] || "") === key) {
-      sh.getRange(r+1,1,1,8).setValues([[
-        key, source.source || values[r][1] || "", source.city || values[r][2] || "",
-        source.link || values[r][3] || "", "DIRTY", now, values[r][6] || "", reason || values[r][7] || ""
-      ]]);
-      return {success:true,key:key,updated:true};
-    }
-  }
-  sh.appendRow([key,source.source || "",source.city || "",source.link || "","DIRTY",now,"",reason || ""]);
-  return {success:true,key:key,updated:false};
-}
 
 function queueAllScheduleSnapshotsV320() {
   var sources = opsListMasterSourcesV312_(true).sources || [];

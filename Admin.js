@@ -907,27 +907,6 @@ function getMasterIncrementalStatusV328(){
 
 /* ================= END V3.2.8 INCREMENTAL MASTER ================= */
 
-function beLogSystemErrorV34_(code,source,villa,message){
-  try{
-    var ss=SpreadsheetApp.getActiveSpreadsheet();
-    var sh=ss.getSheetByName('SYSTEM_ERRORS')||ss.insertSheet('SYSTEM_ERRORS');
-    if(sh.getLastRow()===0){
-      sh.appendRow(['THỜI GIAN','MÃ LỖI','NGUỒN','CĂN','NỘI DUNG']);
-    }
-    sh.appendRow([new Date(),code,source||'',villa||'',message||'']);
-  }catch(ignore){}
-}
-
-function beReadSystemErrorsV34_(limit){
-  var sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SYSTEM_ERRORS');
-  if(!sh||sh.getLastRow()<2)return[];
-  var n=Math.min(Number(limit||50),sh.getLastRow()-1);
-  var v=sh.getRange(sh.getLastRow()-n+1,1,n,5).getDisplayValues();
-  return v.reverse().map(function(r){
-    return {time:r[0],code:r[1],source:r[2],villa:r[3],message:r[4]};
-  });
-}
-
 function setupMasterAreaOptionsV21(){
   var ss=SpreadsheetApp.getActiveSpreadsheet();
   var sheet=ss.getSheetByName(BE_CONFIG.MASTER_SHEET);

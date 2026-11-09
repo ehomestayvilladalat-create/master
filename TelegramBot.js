@@ -30,10 +30,6 @@ function tgPropertyV315_(key) {
   return String(PropertiesService.getScriptProperties().getProperty(key) || "").trim();
 }
 
-/** Giữ tên hàm cũ để 23_AiHealthWatch/29_OpsTests không phải sửa. */
-function aiGetPropertyV31FallbackTelegram_(key) {
-  return tgPropertyV315_(key);
-}
 
 function tgApiV31_(method, payload) {
   var token = tgPropertyV315_("TELEGRAM_BOT_TOKEN");
@@ -950,8 +946,6 @@ function tgHelpV315_() {
   ].join("\n");
 }
 
-/** Giữ alias để test V3.1.2 cũ không lỗi. */
-function tgHelpV312_() { return tgHelpV315_(); }
 
 function tgImageSummaryV329_(img) {
   img = img || {};
@@ -1046,8 +1040,6 @@ function tgFormatImageV315_(img) {
   ].join("\n");
 }
 
-/** Alias cũ cho Health/Tests. */
-function tgFormatImageV31_(img) { return tgFormatImageV315_(img); }
 
 function tgFormatConfigSummaryV315_(r) {
   r = r || {};
@@ -1064,23 +1056,6 @@ function tgFormatConfigSummaryV315_(r) {
   ].join("\n");
 }
 
-function tgFormatSourcesV312_(r) {
-  r = r || {};
-  var lines = [
-    "🏠 SỨC KHỎE NGUỒN",
-    "Tổng: " + Number(r.total || 0) + " | Ổn: " + Number(r.ok || 0) + " | Cảnh báo: " + Number(r.warning || 0) + " | Lỗi: " + Number(r.error || 0)
-  ];
-
-  (r.sources || [])
-    .filter(function(x){ return x.status !== "OK"; })
-    .forEach(function(x){
-      lines.push("• " + x.source + " — " + (typeof tgViStatusWordV1_ === "function" ? tgViStatusWordV1_(x.status) : x.status) + " — " + x.villas + " căn — " + (x.warnings || []).join(","));
-    });
-
-  if (lines.length === 2) lines.push("Tất cả nguồn đều ổn.");
-  lines.push("Chi tiết: /source <nguồn>");
-  return lines.join("\n");
-}
 
 function tgBuildSourceConsoleV315_(selector) {
   var sourceHealth = getSourceHealthOneV312(selector);
@@ -1240,11 +1215,6 @@ function tgFormatEventsV31_(events) {
   }).join("\n");
 }
 
-/** Alias cũ để các test/helper ngoài file không vỡ. */
-function tgFormatOneSourceV312_(r) {
-  if (!r || !r.success) return "❌ SOURCE_NOT_FOUND";
-  return tgFormatSourceConsoleV315_(tgBuildSourceConsoleV315_(r.source && r.source.source || ""));
-}
 
 function testTelegramImageV311() {
   var chatId = tgPropertyV315_("TELEGRAM_ADMIN_CHAT_ID");

@@ -77,13 +77,6 @@ function stMatchesSelectorV11_(x,q){
   return id === q || name === q || source === q;
 }
 
-function stMatchesSelectorLooseV12_(x,q){
-  var id = stNormalizeV1_(x && x.id);
-  var name = stNormalizeV1_(x && x.name);
-  var source = stNormalizeV1_(x && x.source);
-  if (!q) return false;
-  return stMatchesSelectorV11_(x,q) || id.indexOf(q) >= 0 || name.indexOf(q) >= 0 || source.indexOf(q) >= 0;
-}
 
 function stStaticCandidateContextV11_(options){
   options = options || {};

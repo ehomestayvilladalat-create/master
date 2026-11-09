@@ -1261,53 +1261,6 @@ function ceCompareVillasBestCapacityV332_(a, b, guestCount, shuffleSeed, priorit
   );
 }
 
-function ceSortBestCapacityFirstV332_(results, shuffleSeed) {
-  (results || []).sort(function(a, b) {
-    var rankA = ceBestCapacityRankV332_(a);
-    var rankB = ceBestCapacityRankV332_(b);
-
-    if (rankA !== rankB) return rankA - rankB;
-
-    var differenceA = Number(a && a.capacityDifference);
-    var differenceB = Number(b && b.capacityDifference);
-
-    // Căn dư khách: dư ít đứng trước.
-    if (rankA === 1 && differenceA !== differenceB) {
-      return differenceA - differenceB;
-    }
-
-    // Căn thiếu khách: thiếu ít đứng trước.
-    if (rankA === 3 && differenceA !== differenceB) {
-      return differenceB - differenceA;
-    }
-
-    // BEST V3.4.0: cùng mức phù hợp thì trộn để mỗi lượt search không
-    // luôn hiện đúng một nhóm căn. PRICE_ASC/DESC vẫn do PriceEngine xử lý.
-    if (shuffleSeed) {
-      var shuffleA = ceStableShuffleKeyV340_(shuffleSeed, a);
-      var shuffleB = ceStableShuffleKeyV340_(shuffleSeed, b);
-      if (shuffleA !== shuffleB) return shuffleA < shuffleB ? -1 : 1;
-    }
-
-    // Không có seed (API legacy) thì giữ hành vi cũ: giá thấp hơn trước.
-    var priceA = ceSortableTotalPriceV332_(a);
-    var priceB = ceSortableTotalPriceV332_(b);
-    if (priceA === null && priceB !== null) return 1;
-    if (priceA !== null && priceB === null) return -1;
-    if (priceA !== null && priceA !== priceB) return priceA - priceB;
-
-    var sourceCompare = String(a && a.source || "").localeCompare(
-      String(b && b.source || ""),
-      "vi"
-    );
-    if (sourceCompare !== 0) return sourceCompare;
-
-    return String(a && a.name || "").localeCompare(
-      String(b && b.name || ""),
-      "vi"
-    );
-  });
-}
 
 /**
  * V3.4.3 HIGH RECALL CAPACITY RANK
@@ -1340,13 +1293,6 @@ function ceBestCapacityRankByFitV332_(fit) {
   return difference > 0 ? 1 : 3;
 }
 
-function ceSortableTotalPriceV332_(villa) {
-  var value = villa && villa.totalPrice;
-  if (value === null || value === undefined || value === "") return null;
-
-  var price = Number(value);
-  return Number.isFinite(price) ? price : null;
-}
 
 function ceCapacityFit_(standardValue, guestCount, minValue, maxValue) {
   var guests = Number(guestCount || 0);
@@ -1409,8 +1355,6 @@ function ceCapacityFit_(standardValue, guestCount, minValue, maxValue) {
     group: group
   };
 }
-
-
 
 
 /**
@@ -1626,25 +1570,6 @@ function ceStableShuffleKeyV340_(seed, villa) {
     Utilities.Charset.UTF_8
   );
   return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/g, "").slice(0, 18);
-}
-
-function testSearchShuffleV340_() {
-  var list = [
-    {id:"A",name:"A",source:"S",standard:10},
-    {id:"B",name:"B",source:"S",standard:10},
-    {id:"C",name:"C",source:"S",standard:10},
-    {id:"D",name:"D",source:"S",standard:12}
-  ];
-  var one = list.slice().sort(function(a,b){
-    return ceCompareVillasBestCapacityV332_(a,b,10,"seed_one");
-  }).map(function(x){ return x.id; }).join(",");
-  var two = list.slice().sort(function(a,b){
-    return ceCompareVillasBestCapacityV332_(a,b,10,"seed_two");
-  }).map(function(x){ return x.id; }).join(",");
-  var pass = one !== two && one.indexOf("D") > 1 && two.indexOf("D") > 1;
-  if (!pass) throw new Error("SEARCH_SHUFFLE_V340_FAILED: " + one + " / " + two);
-  Logger.log(JSON.stringify({code:"SEARCH_SHUFFLE_PASS_V340",one:one,two:two}));
-  return {success:true,one:one,two:two};
 }
 
 

@@ -41,18 +41,6 @@ function saClassifyAccessErrorV1_(message) {
   return "OTHER";
 }
 
-/**
- * Lấy MASTER sheet
- */
-function saGetMasterSheetV1_() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    return ss.getSheetByName(EHOME_SOURCE_ACCESS_V1.MASTER_TAB_NAME);
-  } catch (e) {
-    Logger.log("[SourceAccess] Error getting MASTER sheet: " + e.message);
-    return null;
-  }
-}
 
 /**
  * Lấy hoặc tạo tab NO_ACCESS_SOURCES
@@ -274,12 +262,6 @@ function saGetNoAccessSourceIdsV1_() {
   }
 }
 
-/**
- * Lấy số lượng NO_ACCESS sources
- */
-function saGetNoAccessCountV1_() {
-  return saGetNoAccessSourceIdsV1_().length;
-}
 
 /**
  * Đọc source từ MASTER sheet bằng source.id
@@ -320,10 +302,3 @@ function saMarkRecoveredIfNeededV1_(source) {
   }
 }
 
-/**
- * Kiểm tra xem source có đang là NO_ACCESS không
- */
-function saIsNoAccessSourceV1_(sourceId) {
-  var ids = saGetNoAccessSourceIdsV1_();
-  return ids.indexOf(sourceId) >= 0;
-}

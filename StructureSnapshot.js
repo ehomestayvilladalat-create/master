@@ -412,17 +412,6 @@ function ssStructureNameSetV320_(villas) {
   return map;
 }
 
-function ssStructureSetDiffRatioV320_(a, b) {
-  a = a || {}; b = b || {};
-  var keys = {};
-  Object.keys(a).forEach(function(k){ keys[k] = true; });
-  Object.keys(b).forEach(function(k){ keys[k] = true; });
-  var all = Object.keys(keys);
-  if (!all.length) return 0;
-  var diff = all.filter(function(k){ return !!a[k] !== !!b[k]; }).length;
-  return diff / all.length;
-}
-
 
 function ssStructureDetectedRowVillasV340_(values, detection, config) {
   values = values || [];

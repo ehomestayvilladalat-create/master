@@ -3113,7 +3113,6 @@ function ceIsBlueFamilyV42_(hex){
 function ceColorMatchesFreeV41_(hex,name){return ceColorMatchesFreeV42_(hex,name);}
 function ceIsWhiteV34_(h){return !h||h==='#ffffff'||h==='#fff'||h==='white';}
 function ceHexRgbV34_(h){var m=String(h||'').match(/^#?([0-9a-f]{6})$/i);if(!m)return null;return [parseInt(m[1].slice(0,2),16),parseInt(m[1].slice(2,4),16),parseInt(m[1].slice(4,6),16)];}
-function ceHueBusyV34_(h){var x=ceHexRgbV34_(h);if(!x)return false;var r=x[0],g=x[1],b=x[2];return (r>180&&g<190&&b<190)||(r>180&&b>150&&g<120)||(r>190&&g>120&&g<230&&b<120);}
 function ceParseColorListV34_(v){return String(v||'').split(/[,|]+/).map(function(x){return ceNormalize_(x);}).filter(Boolean);}
 function ceBuildSourceLinkV34_(file,gid,col,row){return 'https://docs.google.com/spreadsheets/d/'+file.getId()+'/edit#gid='+gid+'&range='+ceColumnToLetterV33_(col+1)+(row+1);}
 function ceColumnToLetterV33_(n){var s='';while(n>0){var r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s;}

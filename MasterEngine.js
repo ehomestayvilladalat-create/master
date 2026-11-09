@@ -98,161 +98,6 @@ function beShouldRefreshImageSourceV4224_(imageSource) {
   return beIsDriveFolderImageSourceV4224_(imageSource);
 }
 
-/* ================= END V2.1 FAST MASTER RUNTIME CACHE ================= */
-
-/**
- * MASTER VILLA V5 - SIMPLE BLACKLIST
- * Base: V3 FIXED_RANGE
- * - Giữ cơ chế nhận diện/chấm điểm V3
- * - FIXED_ROW vẫn phải đạt MIN_SCORE, tránh đọc dư
- * - Blacklist ngắn, có bắt biến thể gần giống
- * - Hỗ trợ Config: MIN_SCORE=18
- */
-
-function buildMasterVillaLegacy_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const master = ss.getSheetByName("MASTER");
-  let output = ss.getSheetByName("MASTER_VILLA");
-
-  if (!master) {
-    throw new Error('Không tìm thấy sheet "MASTER"');
-  }
-
-  if (!output) {
-    output = ss.insertSheet("MASTER_VILLA");
-  }
-
-  output.clearContents();
-
-  const headers = [
-    "MÃ CĂN",
-    "ẢNH",
-    "TÊN CĂN",
-    "THÀNH PHỐ",
-    "NGUỒN",
-    "LINK LỊCH",
-    "TIÊU CHUẨN",
-    "PN",
-    "THÔNG TIN",
-    "MAPS",
-    "CẬP NHẬT"
-  ];
-
-  output.getRange(1, 1, 1, headers.length).setValues([headers]);
-
-  const masterRows = master.getDataRange().getValues();
-  const result = [];
-
-  for (let i = 1; i < masterRows.length; i++) {
-    const sourceID = masterRows[i][0];
-    const city = cleanMasterText(masterRows[i][1]);
-    const source = cleanMasterText(masterRows[i][2]);
-    const link = cleanMasterText(masterRows[i][3]);
-    const enable = masterRows[i][4];
-    const config = cleanMasterText(masterRows[i][5]);
-
-    if (enable !== true || !link) continue;
-
-    try {
-      const sourceFile = beOpenSourceSpreadsheetV_FIX(link);  // FIX: hỗ trợ nguồn .xlsx
-
-      const infoSheet = findMasterInfoSheet(sourceFile);
-      const infoVillas = infoSheet
-        ? readMasterFromInfoSheet(infoSheet, config)
-        : [];
-
-      const calendarSheet = findLatestMasterCalendarSheet(sourceFile);
-      const calendarVillas = calendarSheet
-        ? readMasterFromCalendarSheet(calendarSheet, config)
-        : [];
-
-      let villas = [];
-
-      /*
-       * Sheet lịch là nguồn quyết định danh sách căn.
-       * Sheet thông tin chỉ bổ sung metadata cho đúng tên tương ứng.
-       */
-      if (calendarVillas.length > 0) {
-        const infoMap = {};
-
-        infoVillas.forEach(function(villa) {
-          const key = normalizeMasterText(villa.name);
-          if (key && !infoMap[key]) {
-            infoMap[key] = villa;
-          }
-        });
-
-        villas = calendarVillas.map(function(villa) {
-          const key = normalizeMasterText(villa.name);
-          const info = infoMap[key] || {};
-
-          return {
-            name: villa.name,
-            standard: info.standard || villa.standard || "",
-            bedrooms: info.bedrooms || villa.bedrooms || "",
-            info: info.info || villa.info || "",
-            image: info.image || villa.image || "",
-            maps: info.maps || villa.maps || ""
-          };
-        });
-      } else {
-        /*
-         * Giữ tương thích nguồn chưa có sheet lịch đọc được.
-         */
-        villas = infoVillas;
-      }
-
-      villas = removeDuplicateMasterVillas(villas);
-
-      for (const villa of villas) {
-        if (!villa.name) continue;
-
-        result.push([
-          createVillaSku(sourceID, villa.name),
-          villa.image || "",
-          villa.name || "",
-          city || "",
-          source || "",
-          link || "",
-          villa.standard || "",
-          villa.bedrooms || "",
-          villa.info || "",
-          villa.maps || "",
-          new Date()
-        ]);
-      }
-       } catch (error) {
-      
-    }
-  }
-
-  // ===== DEBUG MASTER_VILLA =====
-  Logger.log("================================");
-  Logger.log("TỔNG SỐ CĂN ĐỌC ĐƯỢC: " + result.length);
-
-  const uniqueNames = new Set(
-    result
-      .map(function(row) {
-        // Cột TÊN CĂN là vị trí số 3 trên sheet,
-        // nhưng trong mảng result là index 2
-        return normalizeMasterText(row[2]);
-      })
-      .filter(String)
-  );
-
-  Logger.log("TỔNG TÊN CĂN DUY NHẤT: " + uniqueNames.size);
-  Logger.log("================================");
-
-  if (result.length > 0) {
-    output
-      .getRange(2, 1, result.length, headers.length)
-      .setValues(result);
-  }
-
-  output.setFrozenRows(1);
-  output.autoResizeColumns(1, headers.length);
-}
-
 
 /**
  * Chỉ trả về các tab đang hiển thị. Mọi bộ dò AUTO đều phải dùng hàm này.
@@ -894,7 +739,6 @@ function hasMasterExplicitStartColumn(rawConfig) {
 }
 
 
-
 function parseMasterColumnConfig(rawConfig) {
   const config = {
     nameMode: "AUTO_ROW",
@@ -1373,7 +1217,6 @@ function sanitizeMasterVillaNameFromKnownRow(value, config, values, rowIndex, co
   const name = extractCalendarVillaName(firstLine);
 
 
-
   const minimumScore =
 
     config && Number.isFinite(config.minimumNameScore)
@@ -1383,26 +1226,21 @@ function sanitizeMasterVillaNameFromKnownRow(value, config, values, rowIndex, co
       : 18;
 
 
-
   const numericRoomAcceptV4200 = name && beIsNumericRoomNameByContextV4200_(
     values, rowIndex, columnIndex, config
   );
   const score = numericRoomAcceptV4200 ? 35 : (name ? scoreCalendarVillaName(name) : -999);
 
 
-
   
-
 
 
   if (!name) return "";
 
 
-
   if (isMasterDefiniteJunkCell(name) && !numericRoomAcceptV4200) {
     return "";
   }
-
 
 
   if (name.length > 180) {
@@ -1414,15 +1252,12 @@ function sanitizeMasterVillaNameFromKnownRow(value, config, values, rowIndex, co
   }
 
 
-
   if (score < minimumScore && !(config && config.nameMode === "FIXED_ROW")) {
     return "";
   }
 
 
-
   
-
 
 
   return name;
@@ -5212,15 +5047,6 @@ function beFindSourceColumnRenamePairsV416_(previousRows, villas){
   return pairs;
 }
 
-function beRenameSkuMapV416_(renamePairs){
-  var map = {};
-  (renamePairs || []).forEach(function(pair){
-    var sourceColumn = Number(pair && pair.sourceColumn || 0);
-    var sku = cleanMasterText(pair && pair.oldSku);
-    if (sourceColumn > 0 && sku) map[sourceColumn] = sku;
-  });
-  return map;
-}
 
 /**
  * Quyết định có được replace block source hay không khi danh sách mới làm mất
@@ -6266,34 +6092,6 @@ function reconcileImageOverridesV330(){
   return beReconcileImageOverridesV330_(SpreadsheetApp.getActiveSpreadsheet());
 }
 
-/** Self-test logic thuần, không sửa sheet. */
-function testImageOverrideReconcileV330_(){
-  var cases = [
-    [true,true,true,"KEEP_MANUAL"],
-    [true,false,false,"KEEP_MANUAL"],
-    [false,true,true,"DELETE_RESOLVED"],
-    [false,false,false,"DELETE_ORPHAN"],
-    [false,true,false,"KEEP_MISSING"]
-  ];
-
-  cases.forEach(function(item){
-    var got = beClassifyImageOverrideRowV330_(item[0],item[1],item[2]);
-    if (got !== item[3]) {
-      throw new Error("V330 FAIL override reconcile: " + JSON.stringify({case:item,got:got}));
-    }
-  });
-
-  var result={
-    success:true,
-    version:"3.3.0-image-override-reconcile",
-    manualKeepPass:true,
-    resolvedDeletePass:true,
-    orphanDeletePass:true,
-    missingKeepPass:true
-  };
-  Logger.log(JSON.stringify({code:"IMAGE_OVERRIDE_RECONCILE_PASS_V330",result:result}));
-  return result;
-}
 function beGetByHeader_(row,index){return index>=0&&index<row.length?row[index]:"";}
 function beBoolCell_(v){return v===true||["true","1","yes","co","x"].indexOf(ceNormalize_(v))>=0;}
 function beWriteMasterStatuses_(sheet,headerRow,statuses){
@@ -6363,9 +6161,6 @@ function beApplySourceWarningsB34_(statuses, store, masterRows) {
   }
 }
 
-function beFindInfoSheetV31_(file, rawMasterConfig){
-  return beFindMetadataSheetV32_(file, rawMasterConfig, "INFO");
-}
 
 /**
  * CONFIG MASTER là nền chung. CONFIG ẢNH và CONFIG THÔNG TIN chỉ ghi đè
@@ -7576,9 +7371,6 @@ function beBuildOverGridImageMapV40_(sheet) {
   return result;
 }
 
-function beFindOverGridImageForColumnV40_(imageMap, columnIndex, allowedRows, sheet) {
-  return beFindOverGridImageForColumnV42_(imageMap, columnIndex, allowedRows, sheet);
-}
 
 /**
  * V4.2 - Ảnh nổi chỉ hợp lệ khi ô neo nằm đúng vùng hàng ảnh cấu hình.
@@ -8843,48 +8635,6 @@ function beAssignImagesBySequenceV46_(villas, imageVillas, rawImageConfig, sheet
   }));
 
   return villas;
-}
-
-
-
-/** V4.14 self-test an toàn, không mở source. */
-function testMasterSafeConfigV414_(){
-  var cfg = parseMasterColumnConfig("TÊN_CỐ_ĐỊNH=B37 VILLA;START_COL=3;END_COL=3;FALLBACK=FALSE");
-  if (cfg.fixedName !== "B37 VILLA" || cfg.startColumnIndex !== 2 || cfg.endColumnIndex !== 2) {
-    throw new Error("V414 FAIL FIXED_NAME parse: " + JSON.stringify(cfg));
-  }
-
-  var values = [["","",""],["","",""],["","","1000000"]];
-  var formulas = [["","",""],["","",""],["","",""]];
-  var villas = readMasterFromColumnLayout(values, formulas, "FIXED_NAME=B37 VILLA;START_COL=3;END_COL=3;FALLBACK=FALSE");
-  if (villas.length !== 1 || villas[0].name !== "B37 VILLA" || Number(villas[0].sourceColumn) !== 3) {
-    throw new Error("V414 FAIL FIXED_NAME reader: " + JSON.stringify(villas));
-  }
-
-  var multi = beCleanMasterMultilineTextV414_("Dalat Mercury Villa\nĐ/C: 5B Đồng Đa\nLH: 0909");
-  if (getCalendarFirstMeaningfulLine(multi) !== "Dalat Mercury Villa") {
-    throw new Error("V414 FAIL multiline name: " + multi);
-  }
-
-  if (!beSupplementNameCompatibleV414_("MP VILLA", "MP VILLA - 5PN") || beSupplementNameCompatibleV414_("A1", "A10")) {
-    throw new Error("V414 FAIL supplement safe name matcher");
-  }
-
-  var merged = beMergeVillaMetadataV31_(
-    [{name:"MP VILLA",sourceColumn:3,standard:"",bedrooms:"",info:"",maps:"",groupOptions:[]}],
-    [
-      {name:"MP VILLA",sourceColumn:7,image:"https://example.com/a.jpg",imageSource:"https://example.com/a.jpg",hasRealCellImage:true},
-      {name:"MP VILLA",sourceColumn:2,info:"5PN - 12 khách",standard:"12",bedrooms:"5",hasInfoEvidence:true,infoValueCount:1}
-    ],
-    {allowSafeNameMatch:true}
-  );
-  if (merged.length !== 1 || merged[0].sourceColumn !== 3 || merged[0].info !== "5PN - 12 khách" || !merged[0].imageSource) {
-    throw new Error("V414 FAIL supplement merge: " + JSON.stringify(merged));
-  }
-
-  var result={success:true,version:"4.14-safe-config-supplement",fixedNamePass:true,multilinePass:true,supplementMatchPass:true};
-  Logger.log(JSON.stringify({code:"MASTER_SAFE_CONFIG_PASS_V414",result:result}));
-  return result;
 }
 
 

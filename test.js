@@ -521,7 +521,8 @@ function testPriceEngineV30(){
 
   if(!cePriceMatchesV30_(known,4000000,5000000)) throw new Error("PRICE FILTER known fail");
   if(cePriceMatchesV30_(known,4600000,5000000)) throw new Error("PRICE FILTER min fail");
-  if(cePriceMatchesV30_(unknown,1000000,9000000)) throw new Error("UNKNOWN price không được qua filter");
+  // V3.4.1 HIGH RECALL (PriceEngine.js): căn đã TRỐNG nhưng chưa có giá vẫn hiện khi lọc giá, xếp sau căn có giá.
+  if(!cePriceMatchesV30_(unknown,1000000,9000000)) throw new Error("V3.4.1: căn trống chưa có giá phải được giữ khi lọc giá");
   if(!cePriceMatchesV30_(unknown,0,0)) throw new Error("UNKNOWN price phải được phép khi không filter");
 
   var items=[
@@ -1339,10 +1340,15 @@ function testConfiguredDateColumnSafetyV2(){
     raw.push(["weekday",day+"/9/2026",day+"/12/2026"]);
     display.push(["weekday",day+"/9/2026",day+"/12/2026"]);
   }
+  // V5.0 (CalendarReader.ceDetectDateColumnV1_): CỘT_NGÀY cấu hình luôn được tôn trọng.
   var recovered=ceDetectDateColumnV1_(raw,display,"T92026",new Date(2026,8,1),{
     dateColumn:2,dateRows:[],dateOrder:"DM"
   });
-  searchAssertV1_(recovered===1,"configured C sai phải recover về B, actual="+(recovered+1));
+  searchAssertV1_(recovered===2,"V5.0: CỘT_NGÀY cấu hình (C) phải được giữ, actual="+(recovered+1));
+  var auto=ceDetectDateColumnV1_(raw,display,"T92026",new Date(2026,8,1),{
+    dateColumn:-1,dateRows:[],dateOrder:"DM"
+  });
+  searchAssertV1_(auto===1,"không cấu hình thì tự dò đúng cột B, actual="+(auto+1));
 
   var valid=ceDetectDateColumnV1_(raw,display,"T92026",new Date(2026,8,1),{
     dateColumn:1,dateRows:[],dateOrder:"DM"
@@ -1356,10 +1362,11 @@ function testConfiguredDateColumnSafetyV2(){
     ambiguousDisplay.push(["x",d+"/9/2026",d+"/9/2026"]);
   }
   var blocked=ceDetectDateColumnV1_(ambiguousRaw,ambiguousDisplay,"T92026",new Date(2026,8,1),{
-    dateColumn:0,dateRows:[],dateOrder:"DM"
+    dateColumn:-1,dateRows:[],dateOrder:"DM"
   });
-  searchAssertV1_(blocked===-1,"hai candidate ngày ngang nhau phải fail-safe, không đoán");
-  var result={success:true,code:"DATE_COLUMN_CONFIG_SAFETY_PASS_V2",recoveredColumn:recovered+1,validColumn:valid+1,ambiguous:"BLOCKED"};
+  // V5.0: hai cột ngày giống hệt nhau => chọn cột trái (điểm trừ theo vị trí), kết quả ổn định.
+  searchAssertV1_(blocked===1,"V5.0: hai cột ngày giống nhau phải chọn ổn định cột trái (B), actual="+(blocked+1));
+  var result={success:true,code:"DATE_COLUMN_CONFIG_SAFETY_PASS_V2",configuredColumn:recovered+1,autoColumn:auto+1,validColumn:valid+1,tieColumn:blocked+1};
   Logger.log(JSON.stringify(result));
   return result;
 }
@@ -1400,7 +1407,8 @@ function testSourceProductTypeInheritanceV2(){
   searchAssertV1_(beSourceProductTypeConfigV2_("","AUTO;LOAI_SP=PHONG_RIENG")==="PHONG_RIENG","CONFIG MASTER phải nhận LOAI_SP");
   searchAssertV1_(beSourceProductTypeConfigV2_("NGUYEN_CAN","AUTO;LOAI_SP=PHONG_RIENG")==="NGUYEN_CAN","cột LOẠI phải ưu tiên hơn config string");
   searchAssertV1_(beResolveProductTypeV2_("","","PHONG_RIENG")==="PHONG_RIENG","blank phải nhận source default");
-  searchAssertV1_(beResolveProductTypeV2_("COMBO","","PHONG_RIENG")==="COMBO","legacy manual phải thắng source default");
+  // V4.22.4 (MasterEngine.beResolveProductTypeV2_): giá trị cũ chưa có LOAI_SP_NGUON không được coi là sửa tay.
+  searchAssertV1_(beResolveProductTypeV2_("COMBO","","PHONG_RIENG")==="PHONG_RIENG","V4.22.4: legacy chưa xác nhận sửa tay phải theo source default");
   searchAssertV1_(beResolveProductTypeV2_("PHONG_RIENG","PHONG_RIENG","NGUYEN_CAN")==="NGUYEN_CAN","generated value phải theo source config mới");
   searchAssertV1_(beResolveProductTypeV2_("COMBO","PHONG_RIENG","NGUYEN_CAN")==="COMBO","manual override phải được giữ");
   var result={success:true,code:"SOURCE_PRODUCT_TYPE_INHERITANCE_PASS_V2",precedence:"MANUAL > SOURCE > BLANK"};

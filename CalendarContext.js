@@ -31,17 +31,6 @@ function ceCreateSourceContextV30_(openedFile, plan) {
   };
 }
 
-function ceMarkSafeFallbackV30_(sourceContext, payload) {
-  if (sourceContext) {
-    sourceContext.fastTimingV30 = sourceContext.fastTimingV30 || {};
-    sourceContext.fastTimingV30.safeFallbacks =
-      Number(sourceContext.fastTimingV30.safeFallbacks || 0) + 1;
-  }
-
-  var out = payload || {};
-  out.code = out.code || "CALENDAR_SAFE_FALLBACK_V30";
-  Logger.log(JSON.stringify(out));
-}
 
 function ceCalendarConfidenceV30_(readResult) {
   if (!readResult || readResult.available !== true) return "BLOCKED";

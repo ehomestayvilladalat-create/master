@@ -668,10 +668,6 @@ function beExportSpreadsheetXlsxFilesV17_(spreadsheetId) {
   return {files:files,method:fetched.method};
 }
 
-/** Giữ tên cũ cho code khác nếu có gọi trực tiếp. */
-function beExportSpreadsheetXlsxFilesV14_(spreadsheetId) {
-  return beExportSpreadsheetXlsxFilesV17_(spreadsheetId).files;
-}
 
 /** Public self-test, không gọi mạng. */
 function testImageDriveCacheV17() {

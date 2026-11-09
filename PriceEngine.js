@@ -84,6 +84,3 @@ function ceSortSearchResultsV30_(results, sortMode) {
   return results;
 }
 
-function cePriceFilterIsActiveV30_(minPrice, maxPrice) {
-  return ceNormalizePriceFilterV30_(minPrice) > 0 || ceNormalizePriceFilterV30_(maxPrice) > 0;
-}

@@ -29,10 +29,6 @@ function opsV41NowIso_(){
   return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
 }
 
-function opsV41Clone_(obj){
-  try { return JSON.parse(JSON.stringify(obj == null ? null : obj)); }
-  catch(e){ return obj; }
-}
 
 function opsV41Issue_(level, code, message, evidence){
   return {

@@ -92,7 +92,6 @@ function verifyImageAuditUrlsV342(limit){
 function runImageAuditV30(){return runImageAuditV342();}
 function getImageAuditSummaryV30(){return getImageAuditSummaryV342();}
 function verifyImageAuditUrlsV30(limit){return verifyImageAuditUrlsV342(limit);}
-function beImageAuditQueueMapV30_(ss){return beImageAuditQueueMapV342_(ss);}
 
 function testImageAuditV342(){
   var reasons=[beImageAuditErrorReasonV342_("Nguồn không còn ảnh tại vị trí đã map."),beImageAuditErrorReasonV342_("Không lấy được URL/Blob/XLSX của ảnh."),beImageAuditErrorReasonV342_("Không map được ảnh theo tên/cột nguồn.")];

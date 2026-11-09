@@ -1,7 +1,9 @@
-_backup_*/
+# Không đẩy lên Apps Script: thư mục backup, tài liệu, file ẩn.
+**/.*
+**/.*/**
+**/node_modules/**
 _backup_*
+_backup_*/**
 **/_backup_*/**
-node_modules/**
-.git/**
-*.md
-.claspignore
+docs/**
+**/*.md
