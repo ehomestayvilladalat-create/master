@@ -368,6 +368,41 @@ function beResolveSourceVillaIdentitiesV1_(ctx,sourceId,source,villas,options){
   });
 
   leftCur=cur.filter(function(c){return !curUsed[c.index];});
+
+  /*
+   * B2 - REVIVED_RETIRED_V1: căn đã bị RETIRE (active=false) quay lại nguồn.
+   * Khôi phục ĐÚNG mã cũ, không cấp mã mới. Khớp theo cùng nguồn + tên (tên hiện
+   * tại hoặc alias cũ); nếu nhiều record cùng tên thì bắt buộc khớp cả cột.
+   * Mơ hồ (không duy nhất) => không gán, để tạo mã mới an toàn như cũ.
+   */
+  var retiredV1=beIdentityRecordsForSourceV1_(ctx,sourceId,source).filter(function(r){return r.active===false;});
+  if(retiredV1.length&&leftCur.length){
+    var revivedSkuV1={};
+    leftCur.forEach(function(c){
+      if(!c.norm)return;
+      var byName=retiredV1.filter(function(r){
+        if(revivedSkuV1[r.sku]||oldUsed[r.sku])return false;
+        if(r.nameNorm===c.norm)return true;
+        return (r.aliases||[]).some(function(a){return normalizeMasterText(a)===c.norm;});
+      });
+      var pick=null;
+      if(byName.length===1)pick=byName[0];
+      else if(byName.length>1){
+        var byCol=byName.filter(function(r){return Number(r.column||0)===c.column;});
+        if(byCol.length===1)pick=byCol[0];
+      }
+      if(!pick)return;
+      // Tên này không được đồng thời là tên của một căn khác đang chờ ghép.
+      var sameNameCur=leftCur.filter(function(x){return x.norm===c.norm;});
+      if(sameNameCur.length>1&&Number(pick.column||0)!==c.column)return;
+      if(pair(c,pick,"REVIVED_RETIRED_V1"))revivedSkuV1[pick.sku]=true;
+    });
+    if(Object.keys(revivedSkuV1).length){
+      Logger.log(JSON.stringify({code:"IDENTITY_REVIVED_RETIRED_V1",sourceId:sourceId,source:source,skus:Object.keys(revivedSkuV1)}));
+    }
+  }
+
+  leftCur=cur.filter(function(c){return !curUsed[c.index];});
   leftOld=old.filter(function(o){return !oldUsed[o.sku];});
 
   /*
@@ -440,6 +475,7 @@ function beRegisterResolvedVillaIdentityV1_(ctx,sourceId,source,villa,sku,assign
   }
   if(name&&rec.name!==name){if(rec.name&&rec.aliases.indexOf(rec.name)<0)rec.aliases.push(rec.name);if(rec.aliases.indexOf(name)<0)rec.aliases.push(name);rec.name=name;rec.nameNorm=norm;rec.status=(assignment.mode||"").indexOf("RENAME")>=0?assignment.mode:"ACTIVE";ctx.dirty=true;}
   if(col&&rec.column!==col){rec.column=col;ctx.dirty=true;}
+  if(rec.active===false){rec.status=(assignment&&assignment.mode)||"REVIVED_RETIRED_V1";ctx.dirty=true;}
   rec.active=true;rec.updated=now;
 }
 
@@ -592,3 +628,17 @@ function testVillaIdentityResolverV1(){
   Logger.log(JSON.stringify(result));return result;
 }
 
+
+/** B2 - căn RETIRED quay lại phải lấy lại đúng mã cũ. Chạy: testVillaIdentityReviveRetiredV1() */
+function testVillaIdentityReviveRetiredV1(){
+  function rec(sku,name,col,active){return {sku:sku,sourceId:"9",source:"SRC",name:name,nameNorm:normalizeMasterText(name),column:col,aliases:[name],active:active,status:active?"ACTIVE":"REMOVED"};}
+  var ctx={records:[],bySourceId:{"9":[rec("A1","Villa A",3,true),rec("B1","Villa B",4,false),rec("C1","Phong Don",5,false),rec("C2","Phong Don",6,false)]},skuSet:{A1:true,B1:true,C1:true,C2:true}};
+  var a=beResolveSourceVillaIdentitiesV1_(ctx,"9","SRC",[{name:"Villa A",sourceColumn:3},{name:"Villa B",sourceColumn:4},{name:"Phong Don",sourceColumn:6}],{});
+  if(!a[0]||a[0].sku!=="A1")throw new Error("REVIVE_TEST_FAIL active");
+  if(!a[1]||a[1].sku!=="B1"||a[1].mode!=="REVIVED_RETIRED_V1")throw new Error("REVIVE_TEST_FAIL revive B");
+  if(!a[2]||a[2].sku!=="C2")throw new Error("REVIVE_TEST_FAIL duplicate name must match column");
+  var b=beResolveSourceVillaIdentitiesV1_(ctx,"9","SRC",[{name:"Villa A",sourceColumn:3},{name:"Phong Don",sourceColumn:9}],{});
+  if(b[1])throw new Error("REVIVE_TEST_FAIL ambiguous must not revive");
+  var result={success:true,code:"VILLA_IDENTITY_REVIVE_PASS_V1"};
+  Logger.log(JSON.stringify(result));return result;
+}

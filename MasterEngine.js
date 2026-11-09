@@ -5175,6 +5175,28 @@ function beAssessSourceReconcileV416_(options){
     };
   }
 
+  // B1 GhostGuard V1: đường xác nhận bổ sung (2 lần đọc giống nhau, chặn giảm >30%).
+  // Không áp dụng khi test inject confirmedStructure để giữ nguyên test cũ.
+  if (!hasInjectedConfirmation && typeof beGhostStableReadConfirmV1_ === "function") {
+    var ghostOkV1 = null;
+    try {
+      ghostOkV1 = beGhostStableReadConfirmV1_(options, currentSet, previousCount, currentCount, missingNames);
+    } catch (ghostErrV1) {
+      Logger.log(JSON.stringify({level:"WARNING",code:"GHOST_GUARD_ERROR_V1",error:String(ghostErrV1 && ghostErrV1.message || ghostErrV1)}));
+      ghostOkV1 = null;
+    }
+    if (ghostOkV1) {
+      return {
+        allow:true,
+        mode:"CONFIRMED_REMOVAL",
+        reason:"GHOST_GUARD_STABLE_READS_V1",
+        missingNames:missingNames,
+        renamePairs:renamePairs,
+        stableReads:ghostOkV1.reads
+      };
+    }
+  }
+
   var queued = false;
   var prioritySource = {
     id:String(options.sourceId || ""),
