@@ -51,6 +51,13 @@ function aiAskWithModelV312_(message, deep) {
 }
 
 function aiCallResponsesV31_(payload, apiKey, kind) {
+  // C1: đang ngắt mạch (hết tiền/khóa API) => không gọi OpenAI, trả lỗi ngay.
+  var breaker = aiBreakerStateV1_();
+  if (breaker && Number(breaker.openUntil || 0) > Date.now()) {
+    return {success:false,error:"AI_CIRCUIT_OPEN",httpCode:Number(breaker.httpCode || 0),
+      message:"AI đang tạm ngưng (" + String(breaker.reason || "") + "), tự thử lại lúc " + aiFormatTimeV1_(breaker.openUntil) +
+        ". Nạp tiền/sửa key xong chạy aiResetBreakerV1() để mở ngay."};
+  }
   var started = Date.now(), resp;
   try {
     resp = UrlFetchApp.fetch("https://api.openai.com/v1/responses",{method:"post",contentType:"application/json",headers:{Authorization:"Bearer "+apiKey},payload:JSON.stringify(payload),muteHttpExceptions:true});
@@ -60,10 +67,129 @@ function aiCallResponsesV31_(payload, apiKey, kind) {
   aiRecordUsageV312_(kind || "NORMAL",payload.model,data,code,Date.now()-started);
   if (code < 200 || code >= 300) {
     var msg = data && data.error && data.error.message ? data.error.message : text;
-    if (typeof beEmitSystemEventV30_ === "function") beEmitSystemEventV30_("ERROR","AI_API_ERROR",{message:String(msg||"OpenAI API error"),httpCode:code});
-    return {success:false,error:"OPENAI_API_ERROR",httpCode:code,message:String(msg || "")};
+    var errCode = data && data.error ? String(data.error.code || data.error.type || "") : "";
+    var trip = aiBreakerShouldTripV1_(code, errCode, msg);
+    if (trip) {
+      aiBreakerOpenV1_(code, trip, msg);
+    } else if (typeof beEmitSystemEventV30_ === "function") {
+      beEmitSystemEventV30_("ERROR","AI_API_ERROR",{message:String(msg||"OpenAI API error"),httpCode:code});
+    }
+    return {success:false,error:trip ? "AI_CIRCUIT_OPEN" : "OPENAI_API_ERROR",httpCode:code,message:String(msg || "")};
   }
+  if (breaker) aiBreakerCloseV1_("OPENAI_OK_AFTER_RETRY");
   return {success:true,data:data,elapsedMs:Date.now()-started};
+}
+
+/*
+ * C1 - NGẮT MẠCH AI KHI HẾT TIỀN / KHÓA API
+ * - 401 (key sai/hết hạn), 402 (thanh toán), 403 (bị chặn), 429 do hết hạn mức
+ *   (insufficient_quota/billing) => ngưng gọi OpenAI 1 giờ. 429 do gọi quá nhanh thì không ngắt.
+ * - Hết giờ: lần gọi kế tiếp thử lại thật; vẫn lỗi => ngưng thêm 1 giờ (không báo lại).
+ * - Báo Telegram admin 1 lần cho mỗi đợt; ghi SYSTEM_EVENT_LOG_V3 (AI_CIRCUIT_OPEN / AI_CIRCUIT_CLOSED).
+ * - Nạp tiền xong: chạy aiResetBreakerV1(). Xem trạng thái: getAiBreakerStatusV1().
+ */
+var EHOME_AI_BREAKER_V1 = {PROPERTY: "EHOME_AI_BREAKER_V1", OPEN_MS: 3600000};
+
+function aiBreakerShouldTripV1_(httpCode, errCode, message) {
+  httpCode = Number(httpCode || 0);
+  var text = (String(errCode || "") + " " + String(message || "")).toLowerCase();
+  if (httpCode === 401) return "KEY_INVALID_OR_EXPIRED_401";
+  if (httpCode === 402) return "PAYMENT_REQUIRED_402";
+  if (httpCode === 403) return "FORBIDDEN_403";
+  if (httpCode === 429 && /insufficient_quota|quota|billing|credit|hard limit|exceeded your current/.test(text)) return "QUOTA_EXHAUSTED_429";
+  return "";
+}
+
+function aiBreakerStateV1_() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(EHOME_AI_BREAKER_V1.PROPERTY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function aiBreakerOpenV1_(httpCode, reason, message) {
+  var prev = aiBreakerStateV1_();
+  var now = Date.now();
+  var state = {
+    reason: String(reason || ""), httpCode: Number(httpCode || 0),
+    message: String(message || "").slice(0, 300),
+    episodeStart: prev && prev.episodeStart ? prev.episodeStart : now,
+    openedAt: now, openUntil: now + EHOME_AI_BREAKER_V1.OPEN_MS,
+    retries: prev ? Number(prev.retries || 0) + 1 : 0,
+    notified: !!(prev && prev.notified)
+  };
+  if (!state.notified) {
+    state.notified = aiBreakerNotifyV1_("🔴 AI (OpenAI) tạm ngưng: " + state.reason + " (HTTP " + state.httpCode + ").\n" +
+      String(state.message || "") + "\nHệ thống tự thử lại mỗi giờ. Nạp tiền/sửa key xong chạy aiResetBreakerV1() để mở ngay.\n" +
+      "Tìm căn/lịch/giá KHÔNG bị ảnh hưởng (không dùng AI).");
+  }
+  try { PropertiesService.getScriptProperties().setProperty(EHOME_AI_BREAKER_V1.PROPERTY, JSON.stringify(state)); } catch (ignore) {}
+  if (typeof beEmitSystemEventV30_ === "function") {
+    beEmitSystemEventV30_("ERROR", "AI_CIRCUIT_OPEN", {message: "AI tạm ngưng: " + state.reason, httpCode: state.httpCode,
+      retries: state.retries, openUntil: new Date(state.openUntil).toISOString()});
+  }
+  return state;
+}
+
+function aiBreakerCloseV1_(reason) {
+  var prev = aiBreakerStateV1_();
+  try { PropertiesService.getScriptProperties().deleteProperty(EHOME_AI_BREAKER_V1.PROPERTY); } catch (ignore) {}
+  if (prev) {
+    if (typeof beEmitSystemEventV30_ === "function") {
+      beEmitSystemEventV30_("INFO", "AI_CIRCUIT_CLOSED", {message: "AI hoạt động lại (" + String(reason || "") + ")", previousReason: prev.reason});
+    }
+    if (prev.notified) aiBreakerNotifyV1_("🟢 AI (OpenAI) đã hoạt động lại.");
+  }
+  return {success: true, code: "AI_CIRCUIT_CLOSED_V1", wasOpen: !!prev, reason: String(reason || "")};
+}
+
+function aiBreakerNotifyV1_(text) {
+  try {
+    if (typeof sendTelegramMessageV31_ !== "function" || typeof tgPropertyV315_ !== "function") return false;
+    var chat = tgPropertyV315_("TELEGRAM_ADMIN_CHAT_ID");
+    if (!chat) return false;
+    var r = sendTelegramMessageV31_(chat, text);
+    return !!(r && r.success !== false);
+  } catch (e) { return false; }
+}
+
+function aiFormatTimeV1_(ms) {
+  try { return Utilities.formatDate(new Date(Number(ms)), Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh", "HH:mm dd/MM"); }
+  catch (e) { return new Date(Number(ms)).toISOString(); }
+}
+
+/** Mở lại AI ngay (sau khi nạp tiền / sửa key). */
+function aiResetBreakerV1() {
+  var r = aiBreakerCloseV1_("MANUAL_RESET");
+  Logger.log(JSON.stringify(r));
+  return r;
+}
+
+/** Xem trạng thái ngắt mạch AI. */
+function getAiBreakerStatusV1() {
+  var st = aiBreakerStateV1_();
+  var r = st
+    ? {success: true, open: Number(st.openUntil || 0) > Date.now(), reason: st.reason, httpCode: st.httpCode,
+       retryAt: aiFormatTimeV1_(st.openUntil), retries: st.retries, notified: st.notified}
+    : {success: true, open: false};
+  Logger.log(JSON.stringify(r));
+  return r;
+}
+
+/** Test thuần cho quy tắc ngắt mạch (không gọi OpenAI, không đổi trạng thái thật). */
+function testAiBreakerRulesV1() {
+  var cases = [
+    [aiBreakerShouldTripV1_(401, "invalid_api_key", "Incorrect API key"), "KEY_INVALID_OR_EXPIRED_401"],
+    [aiBreakerShouldTripV1_(402, "", ""), "PAYMENT_REQUIRED_402"],
+    [aiBreakerShouldTripV1_(403, "", "Country not supported"), "FORBIDDEN_403"],
+    [aiBreakerShouldTripV1_(429, "insufficient_quota", "You exceeded your current quota"), "QUOTA_EXHAUSTED_429"],
+    [aiBreakerShouldTripV1_(429, "rate_limit_exceeded", "Rate limit reached, try again in 2s"), ""],
+    [aiBreakerShouldTripV1_(500, "server_error", ""), ""]
+  ];
+  cases.forEach(function(c, i) { if (c[0] !== c[1]) throw new Error("AI_BREAKER_RULE_FAIL case " + (i + 1) + ": " + c[0]); });
+  var r = {success: true, code: "AI_BREAKER_RULES_PASS_V1", cases: cases.length};
+  Logger.log(JSON.stringify(r));
+  return r;
 }
 
 function aiExtractTextV31_(response) {

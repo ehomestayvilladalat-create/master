@@ -11,6 +11,7 @@ function testQualityFixesV1() {
   results.push(testNewYearCalendarB5());
   results.push(testBatchedRowDeleteB7());
   results.push(testNoAccessCacheB10());
+  results.push(testAiBreakerRulesV1());
   var out = {success: true, code: "QUALITY_FIXES_PASS_V1", suites: results.map(function(r) { return r.code; })};
   Logger.log(JSON.stringify(out));
   return out;
