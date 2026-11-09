@@ -9,6 +9,8 @@ function testQualityFixesV1() {
   ];
   if (typeof testBlankCellUnknownB6 === "function") results.push(testBlankCellUnknownB6());
   results.push(testNewYearCalendarB5());
+  results.push(testBatchedRowDeleteB7());
+  results.push(testNoAccessCacheB10());
   var out = {success: true, code: "QUALITY_FIXES_PASS_V1", suites: results.map(function(r) { return r.code; })};
   Logger.log(JSON.stringify(out));
   return out;
@@ -154,4 +156,33 @@ function testNewYearCalendarB5() {
   qualityAssertV1_(ceCalendarSheetBucketForDateV54_("Tháng 12", new Date(2027, 0, 2)) === "PREVIOUS", "Tháng 12 là tab TRƯỚC của ngày 2/1/2027");
   qualityAssertV1_(ceCalendarSheetBucketForDateV54_("Tháng 1", new Date(2026, 11, 30)) === "NEXT", "Tháng 1 là tab SAU của ngày 30/12/2026");
   return {success: true, code: "NEW_YEAR_CALENDAR_PASS_B5"};
+}
+
+/** B7 - xóa dòng theo khối liền nhau. */
+function testBatchedRowDeleteB7() {
+  var calls = [];
+  var sheet = {deleteRows: function(start, count) { calls.push(start + ":" + count); }};
+  var r = beDeleteSheetRowsBatchedB7_(sheet, [10, 11, 12, 13, 20, 21, 5]);
+  qualityAssertV1_(calls.join(",") === "20:2,10:4,5:1", "xóa theo khối từ dưới lên, thực tế=" + calls.join(","));
+  qualityAssertV1_(r.rows === 7 && r.calls === 3, "7 dòng chỉ cần 3 lệnh");
+  calls = [];
+  beDeleteSheetRowsBatchedB7_(sheet, [7, 7, 1]);
+  qualityAssertV1_(calls.join(",") === "7:1", "bỏ dòng trùng và dòng tiêu đề");
+  return {success: true, code: "BATCHED_ROW_DELETE_PASS_B7"};
+}
+
+/** B10 - file bị từ chối quyền được nhớ 15 phút, lần sau báo ngay không mở lại. */
+function testNoAccessCacheB10() {
+  var fileId = "TEST_NO_ACCESS_FILE_B10";
+  ceRememberNoAccessFileB10_(fileId);
+  qualityAssertV1_(ceNoAccessFileCachedB10_(fileId) === true, "file vừa bị chặn phải được nhớ");
+  qualityAssertV1_(ceNoAccessFileCachedB10_("OTHER_FILE") === false, "file khác không bị ảnh hưởng");
+  var msg = "";
+  try { ceOpenSpreadsheetFastV23_("https://docs.google.com/spreadsheets/d/" + fileId + "/edit"); }
+  catch (e) { msg = String(e && e.message || e); }
+  qualityAssertV1_(saClassifyAccessErrorV1_(msg) === "NO_ACCESS", "lỗi từ bộ nhớ đệm vẫn được phân loại NO_ACCESS");
+  // Dọn: xóa file test khỏi bộ nhớ đệm.
+  delete ceNoAccessFilesB10_()[fileId];
+  try { CacheService.getScriptCache().put(CE_NO_ACCESS_CACHE_KEY_B10_, JSON.stringify(ceNoAccessFilesB10_()), CE_NO_ACCESS_CACHE_SECONDS_B10_); } catch (ignore) {}
+  return {success: true, code: "NO_ACCESS_CACHE_PASS_B10"};
 }

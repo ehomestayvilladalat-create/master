@@ -78,6 +78,7 @@ function saGetNoAccessTabV1_() {
     }
 
     saNormalizeNoAccessTabV1_(tab);
+    saRefreshNoAccessMasterRowsV1_(tab);
     return tab;
   } catch (e) {
     Logger.log("[SourceAccess] Error getting NO_ACCESS tab: " + e.message);
@@ -86,6 +87,40 @@ function saGetNoAccessTabV1_() {
 }
 
 var saNormalizedThisRunV1_ = false;
+var saMasterRowsRefreshedV1_ = false;
+
+/**
+ * B10 - Cột "Dòng MASTER" luôn tính lại từ ID (cột B), mỗi lượt chạy 1 lần.
+ * Bản cũ chỉ ghi số dòng lúc thêm nên lệch khi MASTER chèn/xóa dòng.
+ * ID không còn trong MASTER => 0. Không đụng cột Ghi chú.
+ */
+function saRefreshNoAccessMasterRowsV1_(tab) {
+  if (saMasterRowsRefreshedV1_) return 0;
+  saMasterRowsRefreshedV1_ = true;
+  try {
+    var last = tab.getLastRow();
+    if (last < 2) return 0;
+    var vals = tab.getRange(2, EHOME_SOURCE_ACCESS_V1.COL_MASTER_ROW, last - 1, 2).getValues();
+    var rowById = {};
+    (opsListMasterSourcesV312_(false).sources || []).forEach(function (m) {
+      if (m.id) rowById[String(m.id).trim()] = Number(m.row || 0);
+    });
+    var changed = 0;
+    var colA = vals.map(function (r) {
+      var id = String(r[1] == null ? "" : r[1]).trim();
+      if (!id) return [r[0]];
+      var want = rowById[id] || 0;
+      if (Number(r[0] || 0) !== want) changed++;
+      return [want];
+    });
+    if (changed) tab.getRange(2, EHOME_SOURCE_ACCESS_V1.COL_MASTER_ROW, colA.length, 1).setValues(colA);
+    if (changed) Logger.log("[SourceAccess] B10: cap nhat " + changed + " o 'Dong MASTER' theo ID");
+    return changed;
+  } catch (e) {
+    Logger.log("[SourceAccess] B10 refresh master rows loi: " + (e && e.message ? e.message : e));
+    return 0;
+  }
+}
 var saNoAccessIdsCacheV1_ = null;
 
 function saNoAccessHeadersV1_() {

@@ -3568,6 +3568,9 @@ function buildMasterVilla(options){
   beClearMasterSheetRuntimeCacheV21_();
   // B1 GhostGuard V1: reset trạng thái/ngân sách gỡ căn ảo cho lần build này.
   if (typeof beGhostBeginRunV1_ === "function") beGhostBeginRunV1_();
+  // B7: đo thời gian từng bước.
+  beB7BeginRunV1_();
+  var b7FinalV1 = beB7SourceTimerV1_("", "__CHUAN_BI_VA_GHI_KET_QUA__");
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var master = ss.getSheetByName(BE_CONFIG.MASTER_SHEET);
 
@@ -3716,6 +3719,7 @@ function buildMasterVilla(options){
     };
   }
 
+  b7FinalV1.mark("0_doc_master_va_master_villa_cu");
   var previousSourceCountByLinkV328 = {};
   var previousSourceCountByNameV328 = {};
   previousOutputRowsV328.forEach(function(previousRow) {
@@ -3826,6 +3830,7 @@ function buildMasterVilla(options){
     );
 
     var sourceStartedAtV21 = new Date().getTime();
+    var b7TimerV1 = beB7SourceTimerV1_(sourceId, source);
     var sourceResultStartV328 = result.length;
     var sourceQueueStartV328 = imageQueueRecordsV21.length;
     var sourceMissingRecordStartV328 = imageDiagnostics.missingRecords.length;
@@ -3842,6 +3847,7 @@ function buildMasterVilla(options){
     try {
       var file = beOpenSourceSpreadsheetV_FIX(link);  // FIX: hỗ trợ nguồn .xlsx
       opened++;
+      b7TimerV1.mark("1_mo_file_nguon");
 
       var imageVillas = [];
       var infoVillas = [];
@@ -3866,6 +3872,7 @@ function buildMasterVilla(options){
       var calendarSheet = calendarSelectionV4210.sheet;
       var inactiveCalendarWindowV4210 = calendarSelectionV4210.inactiveWindow === true;
       beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, calendarSelectionV4210.warnings);
+      b7TimerV1.mark("2_chon_tab_lich");
       var imageSheet = calendarSheet;
       var infoSheet = calendarSheet;
       var hasExplicitImageSupplementV414 = beHasExplicitMetadataSheetV38_(imageConfig);
@@ -3989,6 +3996,7 @@ function buildMasterVilla(options){
         return villa;
       });
 
+      b7TimerV1.mark("3_doc_anh_thong_tin");
       var metadataVillas = beMergeSeparatedMetadataV32_(
         imageVillas,
         infoVillas
@@ -4014,10 +4022,12 @@ function buildMasterVilla(options){
         }
       }
 
+      b7TimerV1.mark("4_cau_hinh_snapshot");
       BE_B3_LAST_WARNINGS_V1 = [];
       var calendarVillas = calendarSheet
         ? readMasterFromCalendarSheet(calendarSheet, runtimeMasterConfigV340)
         : [];
+      b7TimerV1.mark("5_doc_ten_can_tu_lich");
       if ((BE_B3_LAST_WARNINGS_V1 || []).length) {
         var b3Letters = BE_B3_LAST_WARNINGS_V1.map(function(w) { return w.letter; });
         beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, [{
@@ -4161,6 +4171,7 @@ function buildMasterVilla(options){
           [sourceIdentityV416]
         );
       });
+      b7TimerV1.mark("6_loc_gom_can");
       var reconcileDecisionV416 = beAssessSourceReconcileV416_({
         sourceId: sourceId,
         source: source,
@@ -4278,6 +4289,7 @@ function buildMasterVilla(options){
         }
       }
 
+      b7TimerV1.mark("7_doi_chieu_va_ma_can");
       var sourceIdentityRegistrationsV1 = [];
       var villaNameCountsV40 = {};
       villas.forEach(function(villa) {
@@ -4588,12 +4600,14 @@ function buildMasterVilla(options){
         }
       }
 
+      b7TimerV1.mark("8_xu_ly_tung_can_anh");
       Logger.log(JSON.stringify({
         code: "MASTER_SOURCE_TIMING_V21",
         sourceId: sourceId,
         source: source,
         villas: villas.length,
-        elapsedMs: new Date().getTime() - sourceStartedAtV21
+        elapsedMs: new Date().getTime() - sourceStartedAtV21,
+        stepsMsB7: b7TimerV1.steps
       }));
 
       sourceStatuses.push({
@@ -4618,6 +4632,7 @@ function buildMasterVilla(options){
       failedRowsV328.push(masterRowNumberV328);
       failedIdentitiesV416.push(sourceIdentityV416);
 
+      b7TimerV1.mark("9_loi_nguon");
       Logger.log(JSON.stringify({
         level: "ERROR",
         code: "MASTER_SOURCE_FAILED_V21",
@@ -4651,6 +4666,7 @@ function buildMasterVilla(options){
         outputHeaders.length
       );
 
+  b7FinalV1.reset();
   // Critical publish window: cache tập candidate hoàn chỉnh trước khi clear.
   // Search sẽ không bao giờ đọc/cache một MASTER_VILLA đang ghi dở.
   var masterPublishSuccessV1 = false;
@@ -4712,11 +4728,14 @@ function buildMasterVilla(options){
   }));
 
   output.setFrozenRows(1);
-  if (!incrementalModeV328) {
+  b7FinalV1.mark("A_ghi_master_villa");
+  // B7: autoResizeColumns chỉ để đẹp nhưng tốn vài giây mỗi build => tắt mặc định.
+  if (!incrementalModeV328 && BE_CONFIG.MASTER_AUTO_RESIZE_COLUMNS === true) {
     output.autoResizeColumns(1, outputHeaders.length);
   }
   beApplySourceWarningsB34_(sourceStatuses, warningsByRowB34, rows);
   beWriteMasterStatuses_(master, rows[0], sourceStatuses);
+  b7FinalV1.mark("B_ghi_trang_thai_nguon");
   beSyncMissingImageOverridesV35_(
     imageOverrideStore.sheet,
     imageDiagnostics.missingRecords
@@ -4760,6 +4779,7 @@ function buildMasterVilla(options){
     }
   }
 
+  b7FinalV1.mark("C_anh_va_hang_doi_anh");
   if (villaIdentityContextV1 && typeof beFlushVillaIdentityContextV1_ === "function") {
     try {
       var identityFlushV1 = beFlushVillaIdentityContextV1_(villaIdentityContextV1);
@@ -4785,6 +4805,8 @@ function buildMasterVilla(options){
     }
   }
 
+  b7FinalV1.mark("D_luu_so_ma_can_va_can_ao");
+  beB7LogSummaryV1_(incrementalModeV328 ? "INCREMENTAL" : "FULL", new Date().getTime() - buildStartedAtV21);
   Logger.log(JSON.stringify({
     code: "IMAGE_CACHE_SUMMARY",
     mode: BE_CONFIG.IMAGE_CACHE_INLINE === true ? "INLINE" : "BACKGROUND_QUEUE",
@@ -5618,9 +5640,7 @@ function applyDeletedSourceOrphansV4196(){
 
   var ss=SpreadsheetApp.getActiveSpreadsheet();
   var villa=ss.getSheetByName(BE_CONFIG.MASTER_VILLA_SHEET||"MASTER_VILLA");
-  preview.rows.slice().sort(function(a,b){return Number(b.sheetRow)-Number(a.sheetRow);}).forEach(function(item){
-    villa.deleteRow(Number(item.sheetRow));
-  });
+  beDeleteSheetRowsBatchedB7_(villa, preview.rows.map(function(item){return Number(item.sheetRow);}));
   if(typeof clearBookingEngineCache==="function")clearBookingEngineCache();
   var uniqueSources={};
   preview.rows.forEach(function(x){if(x.source)uniqueSources[x.source]=true;});
@@ -5689,7 +5709,7 @@ function autoApplyDeletedSourceOrphansV619_(options){
     if(g.source)sourceNames[g.source]=true;
     g.rows.forEach(function(item){rows.push(item);if(item.sku)skus.push(item.sku);});
   });
-  rows.slice().sort(function(a,b){return Number(b.sheetRow)-Number(a.sheetRow);}).forEach(function(item){villa.deleteRow(Number(item.sheetRow));});
+  beDeleteSheetRowsBatchedB7_(villa, rows.map(function(item){return Number(item.sheetRow);}));
 
   var identity=null;
   if(typeof beRetireVillaIdentitySkusV619_==="function"){
@@ -5700,6 +5720,23 @@ function autoApplyDeletedSourceOrphansV619_(options){
   var result={success:true,code:"MASTER_ORPHAN_AUTO_V619",removed:rows.length,sources:Object.keys(sourceNames).sort(),identity:identity,blocked:blocked.slice(0,30),remaining:Math.max(0,preview.count-rows.length)};
   Logger.log(JSON.stringify(result));
   return result;
+}
+
+/**
+ * B7 - Xóa nhiều dòng theo khối liền nhau, từ dưới lên (không để lệch số dòng).
+ * 150 dòng của một nguồn thường liền nhau => 1 lệnh deleteRows thay vì 150 lệnh deleteRow.
+ */
+function beDeleteSheetRowsBatchedB7_(sheet, rowNumbers) {
+  var sorted = (rowNumbers || []).map(Number).filter(function(r){ return r > 1; })
+    .sort(function(a, b){ return b - a; });
+  var blocks = [];
+  sorted.forEach(function(r){
+    var last = blocks[blocks.length - 1];
+    if (last && r === last.start - 1) { last.start = r; last.count++; }
+    else if (!last || r !== last.start) { blocks.push({start: r, count: 1}); }
+  });
+  blocks.forEach(function(b){ sheet.deleteRows(b.start, b.count); });
+  return {rows: sorted.length, calls: blocks.length};
 }
 
 function testDeletedSourceAutoGuardV619(){
@@ -6121,6 +6158,62 @@ function beWriteMasterStatuses_(sheet,headerRow,statuses){
   updateColumn_(h.status,function(x){return x.status;});
   updateColumn_(h.lastSync,function(x){return x.time;});
 }
+/**
+ * B7 - Đo thời gian từng bước của build MASTER.
+ * Mỗi nguồn có một bộ đếm: mark(bước) cộng thời gian kể từ lần mark trước.
+ * Cuối build in MASTER_BUILD_STEP_TIMING_B7: tổng theo bước + 10 nguồn chậm nhất.
+ */
+var BE_B7_RUN_V1 = null;
+
+function beB7BeginRunV1_() {
+  BE_B7_RUN_V1 = {steps: {}, sources: []};
+  return BE_B7_RUN_V1;
+}
+
+function beB7SourceTimerV1_(sourceId, source) {
+  if (!BE_B7_RUN_V1) beB7BeginRunV1_();
+  var run = BE_B7_RUN_V1;
+  var timer = {sourceId: String(sourceId || ""), source: String(source || ""), steps: {}, last: new Date().getTime(), total: 0};
+  run.sources.push(timer);
+  timer.mark = function(step) {
+    var now = new Date().getTime();
+    var ms = now - timer.last;
+    timer.last = now;
+    timer.steps[step] = (timer.steps[step] || 0) + ms;
+    timer.total += ms;
+    run.steps[step] = (run.steps[step] || 0) + ms;
+    return ms;
+  };
+  timer.reset = function() { timer.last = new Date().getTime(); };
+  return timer;
+}
+
+function beB7LogSummaryV1_(mode, elapsedMs) {
+  var run = BE_B7_RUN_V1;
+  if (!run) return null;
+  var steps = Object.keys(run.steps).sort().map(function(k) {
+    return {step: k, ms: run.steps[k], pct: elapsedMs > 0 ? Math.round(run.steps[k] * 100 / elapsedMs) : 0};
+  });
+  var slow = run.sources.filter(function(t) { return t.source.indexOf("__") !== 0; })
+    .sort(function(a, b) { return b.total - a.total; }).slice(0, 10)
+    .map(function(t) { return {sourceId: t.sourceId, source: t.source, ms: t.total, steps: t.steps}; });
+  var summary = {code: "MASTER_BUILD_STEP_TIMING_B7", mode: mode, elapsedMs: elapsedMs,
+    sources: run.sources.length - 1, steps: steps, slowestSources: slow};
+  Logger.log(JSON.stringify(summary));
+  try {
+    PropertiesService.getScriptProperties().setProperty("BE_B7_LAST_BUILD_TIMING", JSON.stringify(summary).slice(0, 8500));
+  } catch (ignore) {}
+  return summary;
+}
+
+/** Xem số đo của lần build gần nhất (chạy tay trong Apps Script). */
+function showLastBuildTimingB7() {
+  var raw = PropertiesService.getScriptProperties().getProperty("BE_B7_LAST_BUILD_TIMING") || "{}";
+  var data = JSON.parse(raw);
+  Logger.log(JSON.stringify(data, null, 2));
+  return data;
+}
+
 /** B3/B4 - gom cảnh báo theo dòng MASTER (không trùng lặp). */
 function beAddSourceWarningsB34_(store, row, warnings) {
   if (!store || !row || !warnings || !warnings.length) return;

@@ -46,6 +46,9 @@ var BE_CONFIG = {
   IMAGE_CACHE_CLEANUP_TO_TRASH: true,
   STORAGE_MAINTENANCE_HANDLER: "runEhomeStorageMaintenanceV340",
 
+  // B7: autoResizeColumns MASTER_VILLA tốn vài giây mỗi build, chỉ để đẹp. Bật lại: true.
+  MASTER_AUTO_RESIZE_COLUMNS: false,
+
   // MASTER có cấu hình riêng cho tên, lịch, ảnh và thông tin.
   MASTER_HEADERS: [
     "ID", "Thành phố", "Nguồn", "Link", "Enable",

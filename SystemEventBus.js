@@ -26,9 +26,18 @@ function beEmitSystemEventV30_(level, type, payload) {
       String(BE_CONFIG.VERSION || "")
     ]);
 
-    var extra = sheet.getLastRow() - EHOME_EVENT_V30.MAX_ROWS;
-    if (extra > 0) sheet.deleteRows(2, extra);
-    if (sheet.getLastRow() % 100 === 0) cleanupSystemEventsV340_();
+    // C2/B7: bản cũ khi log đầy (2.500 dòng) thì MỖI sự kiện đều xóa 1 dòng và chạy
+    // cleanup (đọc lại 2.500 ô thời gian) vì getLastRow() luôn = 2500 (chia hết 100).
+    // Giờ chỉ dọn theo lô khi vượt MAX_ROWS + 100 dòng: ít lệnh hơn ~100 lần.
+    var lastRow = sheet.getLastRow();
+    var extra = lastRow - 1 - EHOME_EVENT_V30.MAX_ROWS;
+    if (extra >= 100) {
+      sheet.deleteRows(2, extra);
+      cleanupSystemEventsV340_();
+    } else if (extra < 0 && lastRow % 100 === 0) {
+      // Chưa đầy: cứ 100 sự kiện dọn dòng cũ hơn 7 ngày một lần (như cũ).
+      cleanupSystemEventsV340_();
+    }
   } catch (error) {
     Logger.log(JSON.stringify({
       code:"SYSTEM_EVENT_WRITE_FAIL_V30",

@@ -1116,18 +1116,58 @@ function ceOpenSpreadsheetFastV23_(url) {
   var text = String(url || "");
   var match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
+    // B10: file vừa bị từ chối quyền trong 15 phút qua => báo ngay, không mở lại (tiết kiệm 1-3 giây/nguồn).
+    if (ceNoAccessFileCachedB10_(match[1])) {
+      throw new Error("PERMISSION_DENIED (cached 15 phút): You do not have permission to access the requested document. fileId=" + match[1]);
+    }
     try {
       return SpreadsheetApp.openById(match[1]);
     } catch (e) {
       var msg = String(e && e.message ? e.message : e);
       var classify = saClassifyAccessErrorV1_(msg);
       if (classify === "NO_ACCESS") {
+        ceRememberNoAccessFileB10_(match[1]);
         throw e;  // Báo lỗi ngay, không thử openByUrl (tránh gọi API 2 lần)
       }
       // Lỗi tạm thời: thử openByUrl
     }
   }
   return beOpenSourceSpreadsheetV_FIX(text);  // FIX: nguồn .xlsx convert tạm, Google Sheet giữ nguyên
+}
+
+/*
+ * B10 - Danh sách file bị từ chối quyền gần đây: 1 khóa CacheService (15 phút),
+ * đọc 1 lần mỗi lượt chạy. Khi chủ nguồn cấp lại quyền, tối đa 15 phút sau đọc lại được.
+ */
+var CE_NO_ACCESS_FILES_B10_ = null;
+var CE_NO_ACCESS_CACHE_KEY_B10_ = "BE_NO_ACCESS_FILES_B10";
+var CE_NO_ACCESS_CACHE_SECONDS_B10_ = 900;
+
+function ceNoAccessFilesB10_() {
+  if (CE_NO_ACCESS_FILES_B10_) return CE_NO_ACCESS_FILES_B10_;
+  CE_NO_ACCESS_FILES_B10_ = {};
+  try {
+    var raw = CacheService.getScriptCache().get(CE_NO_ACCESS_CACHE_KEY_B10_);
+    var data = raw ? JSON.parse(raw) : {};
+    var now = new Date().getTime();
+    Object.keys(data || {}).forEach(function(id) {
+      if (Number(data[id]) > now) CE_NO_ACCESS_FILES_B10_[id] = Number(data[id]);
+    });
+  } catch (ignore) {}
+  return CE_NO_ACCESS_FILES_B10_;
+}
+
+function ceNoAccessFileCachedB10_(fileId) {
+  var until = ceNoAccessFilesB10_()[String(fileId || "")];
+  return !!until && until > new Date().getTime();
+}
+
+function ceRememberNoAccessFileB10_(fileId) {
+  try {
+    var map = ceNoAccessFilesB10_();
+    map[String(fileId || "")] = new Date().getTime() + CE_NO_ACCESS_CACHE_SECONDS_B10_ * 1000;
+    CacheService.getScriptCache().put(CE_NO_ACCESS_CACHE_KEY_B10_, JSON.stringify(map), CE_NO_ACCESS_CACHE_SECONDS_B10_);
+  } catch (ignore) {}
 }
 
 function ceBuildFastSearchTimingV23_(sourceCache, sourceStats, masterReadMs, elapsedMs) {
