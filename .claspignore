@@ -1,0 +1,7 @@
+_backup_*/
+_backup_*
+**/_backup_*/**
+node_modules/**
+.git/**
+*.md
+.claspignore

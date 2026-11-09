@@ -1,0 +1,1978 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr">
+    document.addEventListener("DOMContentLoaded",function(){
+      onProductTypeChangeV342();
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/vn.js"></script>
+
+  <style>
+    :root{
+      --green:#17633f;
+      --green-dark:#0f4d31;
+      --green-soft:#ecf5ef;
+      --bg:#f5f7f6;
+      --text:#173a2a;
+      --muted:#6b7f75;
+      --card:#ffffff;
+      --line:#dbe6df;
+      --shadow:0 10px 28px rgba(13,40,26,.08);
+      --hero-image:none;
+    }
+
+    *{box-sizing:border-box}
+
+    html,
+    body,
+    button,
+    input,
+    select,
+    textarea{
+      font-family:"Be Vietnam Pro",Arial,sans-serif;
+    }
+
+    html,
+    body{
+      margin:0;
+      padding:0;
+      background:var(--bg);
+      color:var(--text);
+      -webkit-font-smoothing:antialiased;
+      text-rendering:optimizeLegibility;
+    }
+
+    a{color:inherit}
+
+    .app{min-height:100vh}
+
+    .topbar{
+      position:sticky;
+      top:0;
+      z-index:20;
+      background:rgba(255,255,255,.88);
+      backdrop-filter:blur(14px);
+      border-bottom:1px solid rgba(23,99,63,.08);
+    }
+
+    .topbar-inner{
+      max-width:1180px;
+      margin:0 auto;
+      padding:14px 18px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      font-weight:800;
+      font-size:20px;
+      color:var(--green-dark);
+      min-width:0;
+    }
+
+    .brand-logos{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-shrink:0;
+    }
+
+    .brand-mark{
+      width:42px;
+      height:42px;
+      border-radius:14px;
+      background:linear-gradient(135deg,#e7f3eb,#ffffff);
+      display:grid;
+      place-items:center;
+      color:var(--green);
+      box-shadow:inset 0 0 0 1px rgba(23,99,63,.08);
+      overflow:hidden;
+      flex-shrink:0;
+    }
+
+    .brand-mark svg{width:24px;height:24px}
+
+    .brand-mark img{
+      width:100%;
+      height:100%;
+      object-fit:contain;
+      padding:4px;
+      border-radius:12px;
+      background:#fff;
+    }
+
+    .brand-name{
+      line-height:1.28;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      font-weight:700;
+      letter-spacing:-.35px;
+    }
+
+    .header-actions{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-shrink:0;
+    }
+
+    .header-contact{
+      border:1px solid rgba(23,99,63,.16);
+      background:#fff;
+      color:var(--green-dark);
+      border-radius:999px;
+      padding:10px 14px;
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:-.15px;
+      text-decoration:none;
+      white-space:nowrap;
+    }
+
+    .header-contact.zalo{
+      background:#0868ff;
+      border-color:#0868ff;
+      color:#fff;
+    }
+
+    .hero{
+      position:relative;
+      max-width:1180px;
+      margin:18px auto 0;
+      border-radius:28px;
+      overflow:hidden;
+      min-height:320px;
+      background:
+        linear-gradient(180deg,rgba(6,24,15,.14),rgba(6,24,15,.56)),
+        var(--hero-image),
+        linear-gradient(135deg,#214f39,#7aa688);
+      background-size:cover;
+      background-position:center;
+      box-shadow:var(--shadow);
+    }
+
+    .hero::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      background:linear-gradient(120deg,rgba(15,77,49,.65),rgba(15,77,49,.12) 58%,rgba(0,0,0,.10));
+      pointer-events:none;
+    }
+
+    .hero-inner{
+      position:relative;
+      z-index:1;
+      padding:34px 26px 26px;
+      min-height:320px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      color:#fff;
+    }
+
+    .hero-copy{max-width:660px}
+
+    .hero-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 14px;
+      border-radius:999px;
+      background:rgba(255,255,255,.14);
+      border:1px solid rgba(255,255,255,.2);
+      font-size:13px;
+      font-weight:600;
+      margin-bottom:14px;
+      backdrop-filter:blur(8px);
+    }
+
+    .hero-title{
+      font-size:34px;
+      line-height:1.25;
+      margin:0 0 10px;
+      font-weight:800;
+      letter-spacing:-.8px;
+    }
+
+    .hero-subtitle{
+      margin:0;
+      font-size:15px;
+      line-height:1.65;
+      color:rgba(255,255,255,.92);
+      max-width:600px;
+      font-weight:400;
+    }
+
+    .search-panel-wrap{margin-top:18px}
+
+    .search-panel{
+      background:rgba(255,255,255,.98);
+      color:var(--text);
+      border-radius:22px;
+      padding:18px;
+      box-shadow:0 18px 40px rgba(4,23,14,.18);
+    }
+
+    .areas{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-bottom:14px;
+    }
+
+    .area{
+      border:1px solid rgba(23,99,63,.18);
+      background:#fff;
+      color:var(--green);
+      padding:10px 15px;
+      border-radius:999px;
+      font-weight:700;
+      letter-spacing:-.15px;
+      cursor:pointer;
+      font-size:14px;
+    }
+
+    .area.active{
+      background:var(--green);
+      color:#fff;
+      border-color:var(--green);
+    }
+
+    .search-grid{
+      display:grid;
+      grid-template-columns:1.1fr 1.1fr .7fr 1.45fr .72fr auto;
+      gap:12px;
+      align-items:end;
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+      min-width:0;
+    }
+
+    .field label{
+      font-size:13px;
+      font-weight:700;
+      color:#355847;
+    }
+
+    .price-range-field{min-width:250px}
+
+    .price-range-box{
+      height:48px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#fff;
+      padding:7px 12px 6px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      gap:5px;
+    }
+
+    .price-range-values{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      font-size:11px;
+      font-weight:700;
+      color:var(--green-dark);
+      line-height:1;
+    }
+
+    .price-range-current{
+      font-size:12px;
+      color:#173a2a;
+      white-space:nowrap;
+    }
+
+    .price-range-hint{
+      color:var(--muted);
+      font-size:10px;
+      white-space:nowrap;
+    }
+
+    .dual-range{position:relative;height:16px}
+    .dual-range-track{position:absolute;left:0;right:0;top:7px;height:4px;border-radius:999px;background:#dfe9e3}
+    .dual-range-fill{position:absolute;top:7px;height:4px;border-radius:999px;background:var(--green);left:0;right:0}
+    .dual-range input[type=range]{position:absolute;left:0;top:0;width:100%;height:16px;margin:0;background:transparent;pointer-events:none;-webkit-appearance:none;appearance:none;padding:0;border:0}
+    .dual-range input[type=range]::-webkit-slider-runnable-track{height:4px;background:transparent}
+    .dual-range input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:17px;height:17px;border-radius:50%;background:#fff;border:3px solid var(--green);box-shadow:0 2px 7px rgba(23,99,63,.22);margin-top:-6.5px;pointer-events:auto;cursor:pointer}
+    .dual-range input[type=range]::-moz-range-track{height:4px;background:transparent}
+    .dual-range input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#fff;border:3px solid var(--green);box-shadow:0 2px 7px rgba(23,99,63,.22);pointer-events:auto;cursor:pointer}
+
+    .sort-field{max-width:150px}
+    .sort-field select{padding-left:10px;padding-right:8px;font-size:13px}
+
+    .field input,
+    .field select{
+      width:100%;
+      min-width:0;
+      height:48px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:0 14px;
+      font-size:15px;
+      font-weight:500;
+      outline:none;
+      background:#fff;
+    }
+
+    .field input:focus,
+    .field select:focus{
+      border-color:rgba(23,99,63,.5);
+      box-shadow:0 0 0 4px rgba(23,99,63,.08);
+    }
+
+    .search-btn{
+      height:48px;
+      border:none;
+      background:linear-gradient(135deg,var(--green),var(--green-dark));
+      color:#fff;
+      padding:0 20px;
+      border-radius:14px;
+      font-weight:700;
+      letter-spacing:-.15px;
+      font-size:15px;
+      cursor:pointer;
+      white-space:nowrap;
+      box-shadow:0 10px 18px rgba(23,99,63,.22);
+    }
+
+    .wrap{
+      max-width:1180px;
+      margin:18px auto 36px;
+      padding:0 4px;
+    }
+
+    .meta{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin:10px 0 14px;
+      padding:0 14px;
+    }
+
+    .meta-left{
+      font-size:14px;
+      color:var(--muted);
+      line-height:1.6;
+    }
+
+    .meta strong{color:var(--green-dark)}
+
+    .errors{
+      display:grid;
+      gap:10px;
+      margin:0 14px 14px;
+    }
+
+    .err{
+      background:#fff4f2;
+      color:#8b2d22;
+      border-left:4px solid #d4584a;
+      border-radius:14px;
+      padding:12px 14px;
+      font-size:14px;
+      line-height:1.55;
+    }
+
+    .results{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(270px,1fr));
+      gap:16px;
+      padding:0 14px;
+    }
+
+    .card{
+      background:var(--card);
+      border-radius:20px;
+      overflow:hidden;
+      box-shadow:var(--shadow);
+      border:1px solid rgba(23,99,63,.06);
+      display:flex;
+      flex-direction:column;
+    }
+
+    .card-image{
+      width:100%;
+      aspect-ratio:16/10;
+      background:#dfe8e2;
+      overflow:hidden;
+    }
+
+    .card-image img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+
+    .card-body{
+      padding:16px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      flex:1;
+    }
+
+    .card-title{
+      font-size:18px;
+      font-weight:700;
+      line-height:1.45;
+      letter-spacing:-.25px;
+      color:var(--green-dark);
+    }
+
+    .card-sub{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.55;
+    }
+
+    .card-sku{
+      display:inline-flex;
+      align-items:center;
+      align-self:flex-start;
+      border-radius:8px;
+      background:#eef4f0;
+      color:var(--green-dark);
+      padding:4px 8px;
+      font-size:11px;
+      font-weight:800;
+      letter-spacing:.25px;
+    }
+
+    .card-badges{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      border-radius:999px;
+      background:var(--green-soft);
+      color:var(--green-dark);
+      padding:7px 11px;
+      font-size:12px;
+      font-weight:600;
+    }
+
+    .price{
+      font-size:22px;
+      font-weight:800;
+      color:#cb3b30;
+      margin-top:2px;
+      letter-spacing:-.4px;
+    }
+
+    .night-list{
+      background:#f7faf8;
+      border:1px solid #edf3ef;
+      border-radius:16px;
+      padding:12px 13px;
+      font-size:13px;
+      line-height:1.65;
+      color:#425f51;
+    }
+
+    .night-row{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .btn-row{
+      margin-top:auto;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      height:42px;
+      padding:0 14px;
+      border-radius:12px;
+      font-size:14px;
+      font-weight:700;
+      letter-spacing:-.15px;
+      cursor:pointer;
+      border:none;
+    }
+
+    .btn-primary{
+      background:var(--green);
+      color:#fff;
+      box-shadow:0 8px 16px rgba(23,99,63,.18);
+    }
+
+    .empty{
+      background:#fff;
+      border-radius:18px;
+      padding:26px;
+      text-align:center;
+      color:var(--muted);
+      margin:0 14px;
+      box-shadow:var(--shadow);
+    }
+
+    .load-more-wrap{
+      display:flex;
+      justify-content:center;
+      padding:18px 14px 0;
+    }
+
+    .load-more-btn{
+      min-width:180px;
+      height:46px;
+      border:none;
+      border-radius:14px;
+      padding:0 20px;
+      background:#fff;
+      color:var(--green-dark);
+      box-shadow:var(--shadow);
+      border:1px solid rgba(23,99,63,.14);
+      font-size:14px;
+      font-weight:700;
+      cursor:pointer;
+    }
+
+    .load-more-btn:disabled{
+      opacity:.6;
+      cursor:wait;
+    }
+
+    .auto-load-status{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:9px;
+      min-height:38px;
+      padding:8px 14px;
+      color:var(--muted);
+      font-size:13px;
+      font-weight:600;
+      user-select:none;
+    }
+
+    .auto-load-dot{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      background:var(--green);
+      opacity:.35;
+    }
+
+    .auto-load-status.is-loading .auto-load-dot{
+      animation:ehomeLoadPulse .8s ease-in-out infinite alternate;
+    }
+
+    @keyframes ehomeLoadPulse{
+      from{transform:scale(.72);opacity:.28}
+      to{transform:scale(1.18);opacity:1}
+    }
+
+    .floating-contact{
+      position:fixed;
+      right:16px;
+      bottom:16px;
+      z-index:30;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .float-btn{
+      width:50px;
+      height:50px;
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      color:#fff;
+      text-decoration:none;
+      font-size:18px;
+      font-weight:800;
+      box-shadow:0 10px 24px rgba(10,45,28,.24);
+      border:2px solid rgba(255,255,255,.92);
+    }
+
+    .float-btn.phone{background:var(--green)}
+    .float-btn.zalo{background:#0868ff;font-size:12px}
+
+    .loading{
+      opacity:.68;
+      pointer-events:none;
+    }
+
+    .flatpickr-calendar,
+    .flatpickr-calendar button,
+    .flatpickr-calendar input{
+      font-family:"Be Vietnam Pro",Arial,sans-serif;
+    }
+
+    .flatpickr-input[readonly]{
+      background:#fff;
+      cursor:pointer;
+    }
+
+    @media (max-width:900px){
+      .search-grid{grid-template-columns:1fr 1fr}
+      .search-btn{grid-column:1/-1;width:100%}
+    }
+
+    @media (max-width:700px){
+      .topbar-inner{padding:12px 14px}
+
+      .brand{
+        font-size:16px;
+        gap:10px;
+      }
+
+      .brand-mark{
+        width:38px;
+        height:38px;
+        border-radius:12px;
+      }
+
+      .brand-name{
+        max-width:145px;
+        white-space:normal;
+        font-size:14px;
+        line-height:1.35;
+        font-weight:700;
+        letter-spacing:-.25px;
+      }
+
+      .header-actions{gap:6px}
+
+      .header-contact{
+        padding:8px 10px;
+        font-size:11px;
+      }
+
+      .header-contact.zalo{display:none}
+
+      .hero{
+        margin:10px 10px 0;
+        min-height:auto;
+        border-radius:22px;
+      }
+
+      .hero-inner{
+        padding:20px 14px 14px;
+        min-height:auto;
+      }
+
+      .hero-badge{
+        font-size:12px;
+        padding:7px 11px;
+        margin-bottom:10px;
+      }
+
+      .hero-title{
+        font-size:23px;
+        line-height:1.3;
+        letter-spacing:-.55px;
+      }
+
+      .hero-subtitle{
+        font-size:13px;
+        line-height:1.55;
+      }
+
+      .search-panel-wrap{margin-top:14px}
+
+      .search-panel{
+        border-radius:18px;
+        padding:13px;
+      }
+
+      .areas{margin-bottom:12px}
+
+      .area{
+        padding:9px 13px;
+        font-size:13px;
+      }
+
+      .search-grid{
+        grid-template-columns:1fr;
+        gap:10px;
+      }
+
+      .field input,
+      .field select{
+        height:44px;
+        border-radius:12px;
+        font-size:14px;
+      }
+
+      .price-range-field{min-width:0}
+      .price-range-box{height:50px;border-radius:12px}
+      .sort-field{max-width:none}
+
+      .search-btn{
+        height:44px;
+        border-radius:12px;
+        font-size:14px;
+      }
+
+      .wrap{margin:14px auto 28px}
+      .meta{padding:0 10px}
+      .errors{margin:0 10px 12px}
+
+      .results{
+        grid-template-columns:1fr;
+        gap:12px;
+        padding:0 10px;
+      }
+
+      .card-body{padding:14px}
+      .card-title{font-size:16px}
+      .price{font-size:20px}
+
+      .floating-contact{
+        right:10px;
+        bottom:10px;
+        flex-direction:row;
+      }
+
+      .float-btn{
+        width:44px;
+        height:44px;
+      }
+    }
+
+    /* ===== EHOME MOBILE UI V3.3.1 =====
+       Mobile-first overrides only. Desktop layout/logic stays unchanged.
+    */
+    @media (max-width:700px){
+      html{scroll-padding-top:58px}
+      body{
+        background:#f3f6f4;
+        padding-bottom:calc(70px + env(safe-area-inset-bottom));
+      }
+
+      .topbar{
+        background:rgba(255,255,255,.96);
+        backdrop-filter:blur(16px);
+      }
+
+      .topbar-inner{
+        min-height:56px;
+        padding:8px 10px;
+      }
+
+      .brand{
+        width:100%;
+        gap:8px;
+        font-size:14px;
+      }
+
+      .brand-logos{gap:6px}
+
+      .brand-mark{
+        width:34px;
+        height:34px;
+        border-radius:10px;
+      }
+
+      .brand-mark img{
+        padding:3px;
+        border-radius:9px;
+      }
+
+      .brand-name{
+        max-width:none;
+        white-space:nowrap;
+        font-size:13px;
+        line-height:1.2;
+        letter-spacing:-.2px;
+      }
+
+      .header-actions{display:none}
+
+      .hero{
+        margin:0;
+        border-radius:0 0 22px 22px;
+        min-height:auto;
+        box-shadow:0 8px 24px rgba(13,40,26,.10);
+      }
+
+      .hero::before{
+        background:linear-gradient(180deg,rgba(10,47,29,.54),rgba(10,47,29,.22) 42%,rgba(7,31,20,.48));
+      }
+
+      .hero-inner{
+        min-height:auto;
+        padding:15px 10px 11px;
+      }
+
+      .hero-copy{
+        max-width:none;
+        padding:2px 4px 0;
+      }
+
+      .hero-badge{display:none}
+
+      .hero-title{
+        margin:0 0 5px;
+        font-size:21px;
+        line-height:1.25;
+        letter-spacing:-.5px;
+      }
+
+      .hero-subtitle{
+        max-width:100%;
+        font-size:12px;
+        line-height:1.45;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+        overflow:hidden;
+      }
+
+      .search-panel-wrap{margin-top:11px}
+
+      .search-panel{
+        padding:10px;
+        border-radius:16px;
+        box-shadow:0 10px 24px rgba(4,23,14,.16);
+      }
+
+      .areas{
+        flex-wrap:nowrap;
+        overflow-x:auto;
+        overscroll-behavior-x:contain;
+        -webkit-overflow-scrolling:touch;
+        scrollbar-width:none;
+        gap:6px;
+        margin:0 -2px 9px;
+        padding:0 2px 2px;
+      }
+
+      .areas::-webkit-scrollbar{display:none}
+
+      .area{
+        flex:0 0 auto;
+        padding:8px 11px;
+        min-height:36px;
+        font-size:12px;
+      }
+
+      .search-grid{
+        grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+        gap:8px;
+        align-items:end;
+      }
+
+      .search-grid>.field:nth-child(1){
+        grid-column:1;
+        grid-row:1;
+      }
+
+      .search-grid>.field:nth-child(2){
+        grid-column:2;
+        grid-row:1;
+      }
+
+      .search-grid>.field:nth-child(3){
+        grid-column:1;
+        grid-row:2;
+      }
+
+      .sort-field{
+        grid-column:2;
+        grid-row:2;
+        max-width:none;
+      }
+
+      .price-range-field{
+        grid-column:1/-1;
+        grid-row:3;
+        min-width:0;
+      }
+
+      .search-btn{
+        grid-column:1/-1;
+        grid-row:4;
+        width:100%;
+        height:44px;
+        margin-top:1px;
+        border-radius:12px;
+        font-size:14px;
+        box-shadow:0 8px 16px rgba(23,99,63,.18);
+      }
+
+      .field{gap:5px}
+
+      .field label{
+        font-size:11px;
+        line-height:1.2;
+        color:#496657;
+      }
+
+      .field input,
+      .field select{
+        height:42px;
+        min-height:42px;
+        padding:0 10px;
+        border-radius:11px;
+        font-size:13px;
+      }
+
+      .sort-field select{
+        padding-left:9px;
+        padding-right:6px;
+        font-size:12px;
+      }
+
+      .price-range-box{
+        height:46px;
+        padding:6px 10px 5px;
+        border-radius:11px;
+        gap:4px;
+      }
+
+      .price-range-values{font-size:10px}
+      .price-range-current{font-size:11px}
+      .price-range-hint{font-size:9px}
+      .dual-range{height:15px}
+
+      .wrap{
+        margin:10px auto 18px;
+        padding:0;
+      }
+
+      .meta{
+        margin:0 10px 10px;
+        padding:9px 11px;
+        gap:8px;
+        border:1px solid #e2ebe5;
+        border-radius:13px;
+        background:#fff;
+        box-shadow:0 4px 14px rgba(13,40,26,.04);
+      }
+
+      .meta-left{
+        width:100%;
+        font-size:11.5px;
+        line-height:1.5;
+      }
+
+      .errors{
+        gap:7px;
+        margin:0 10px 10px;
+      }
+
+      .err{
+        padding:9px 10px;
+        border-left-width:3px;
+        border-radius:11px;
+        font-size:11.5px;
+        line-height:1.45;
+      }
+
+      .results{
+        grid-template-columns:1fr;
+        gap:10px;
+        padding:0 10px;
+      }
+
+      .card{
+        border-radius:16px;
+        box-shadow:0 6px 18px rgba(13,40,26,.07);
+      }
+
+      .card-image{
+        aspect-ratio:16/9;
+        min-height:0;
+      }
+
+      .card-body{
+        padding:12px;
+        gap:8px;
+      }
+
+      .card-title{
+        font-size:16px;
+        line-height:1.35;
+        letter-spacing:-.25px;
+      }
+
+      .card-sub{
+        font-size:11.5px;
+        line-height:1.45;
+      }
+
+      .card-badges{
+        gap:5px;
+        overflow:hidden;
+      }
+
+      .badge{
+        padding:5px 8px;
+        font-size:10.5px;
+        line-height:1.2;
+      }
+
+      .price{
+        margin-top:0;
+        font-size:20px;
+        line-height:1.2;
+      }
+
+      .night-list{
+        padding:9px 10px;
+        border-radius:12px;
+        font-size:11.5px;
+        line-height:1.55;
+      }
+
+      .night-row{gap:8px}
+
+      .btn-row{
+        display:grid;
+        grid-template-columns:1fr;
+        gap:7px;
+      }
+
+      .btn{
+        width:100%;
+        height:40px;
+        border-radius:11px;
+        font-size:12px;
+      }
+
+      .empty{
+        margin:0 10px;
+        padding:22px 16px;
+        border-radius:15px;
+        font-size:13px;
+      }
+
+      .load-more-wrap{
+        padding:12px 10px 0;
+      }
+
+      .load-more-btn{
+        width:100%;
+        min-width:0;
+        height:44px;
+        border-radius:12px;
+        font-size:13px;
+      }
+
+      .floating-contact{
+        left:10px;
+        right:10px;
+        bottom:calc(8px + env(safe-area-inset-bottom));
+        display:flex;
+        flex-direction:row;
+        gap:8px;
+      }
+
+      .float-btn{
+        flex:1 1 0;
+        width:auto;
+        height:46px;
+        border-radius:14px;
+        border:1px solid rgba(255,255,255,.92);
+        font-size:13px;
+      }
+
+      .float-btn.phone::after{
+        content:"  Gọi ngay";
+        font-size:12px;
+        font-weight:700;
+      }
+
+      .float-btn.zalo{
+        font-size:12px;
+      }
+
+      .float-btn.zalo::before{
+        content:"Nhắn ";
+        font-weight:700;
+      }
+
+      .flatpickr-calendar{
+        max-width:calc(100vw - 20px);
+      }
+    }
+
+    @media (max-width:380px){
+      .brand-name{font-size:12px}
+      .hero-title{font-size:19px}
+      .hero-subtitle{font-size:11.5px}
+      .search-panel{padding:9px}
+      .search-grid{gap:7px}
+      .field input,
+      .field select{font-size:12px}
+      .price-range-hint{display:none}
+      .badge{font-size:10px;padding:5px 7px}
+    }
+
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-logos">
+            <div class="brand-mark" aria-hidden="true">
+              <img id="brandLogo" alt="" style="display:none">
+              <svg id="brandFallback" viewBox="0 0 24 24" fill="none">
+                <path d="M3.5 11.3 12 4l8.5 7.3V20H3.5v-8.7Z" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M8.4 15.8c3.7-.2 6-2.1 7.4-5.5-4.1.2-6.6 1.9-7.4 5.5Z" fill="currentColor"/>
+              </svg>
+            </div>
+
+            <div id="brandMark2" class="brand-mark" style="display:none">
+              <img id="brandLogo2" alt="">
+            </div>
+          </div>
+
+          <div class="brand-name" id="brandName">EHOME CHECK LỊCH & GIÁ HOMESTAY VILLA</div>
+        </div>
+
+        <div class="header-actions">
+          <a id="phoneTop" class="header-contact" href="tel:0934616224">☎ 0934 616 224</a>
+          <a id="zaloTop" class="header-contact zalo" href="https://zalo.me/0934616224" target="_blank">Zalo</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero" id="hero">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <div class="hero-badge">V3 DEV · Lịch chính xác · Giá/đêm · AI Ready</div>
+          <h1 class="hero-title">Tìm homestay, villa trống lịch nhanh</h1>
+          <p class="hero-subtitle">
+            Kiểm tra lịch thực tế theo ngày nhận – ngày trả, lọc nhanh theo khu vực
+            và mở thẳng sheet nguồn để đối chiếu khi cần.
+          </p>
+        </div>
+
+        <div class="search-panel-wrap">
+          <div class="search-panel">
+            <div class="areas">
+              <button id="area-dl" class="area active" onclick="setArea('Đà Lạt',this)">Đà Lạt</button>
+              <button id="area-vt" class="area" onclick="setArea('Vũng Tàu',this)">Vũng Tàu</button>
+              <button id="area-other" class="area" onclick="setArea('Khu vực khác',this)">Khu vực khác</button>
+            </div>
+
+            <div class="search-grid">
+              <div class="field">
+                <label for="ci">Ngày nhận</label>
+                <input id="ci" type="text" placeholder="Chọn ngày nhận" autocomplete="off">
+              </div>
+
+              <div class="field">
+                <label for="co">Ngày trả</label>
+                <input id="co" type="text" placeholder="Chọn ngày trả" autocomplete="off">
+              </div>
+
+              <div class="field">
+                <label for="guests">Số lượng khách</label>
+                <input id="guests" type="number" min="1" value="10">
+              </div>
+
+              <div class="field">
+                <label for="productType">Loại phòng</label>
+                <select id="productType" onchange="onProductTypeChangeV342()">
+                  <option value="NGUYEN_CAN">Nguyên căn</option>
+                  <option value="PHONG_RIENG">Phòng đơn</option>
+                </select>
+              </div>
+
+              <div class="field" id="bedroomsFieldV342">
+                <label for="bedrooms">Phòng ngủ</label>
+                <select id="bedrooms">
+                  <option value="0">Tất cả PN</option>
+                  <option value="1">1 PN</option>
+                  <option value="2">2 PN</option>
+                  <option value="3">3 PN</option>
+                  <option value="4">4 PN</option>
+                  <option value="5">5 PN</option>
+                  <option value="6">6 PN</option>
+                  <option value="7">7 PN</option>
+                  <option value="8">8+ PN</option>
+                </select>
+              </div>
+
+              <div class="field price-range-field" id="priceFieldV342">
+                <label>Giá / đêm</label>
+                <div class="price-range-box">
+                  <div class="price-range-values">
+                    <span class="price-range-current"><span id="priceMinLabel">500k</span> — <span id="priceMaxLabel">8tr</span></span>
+                    <span class="price-range-hint">300k–20tr</span>
+                  </div>
+                  <div class="dual-range">
+                    <div class="dual-range-track"></div>
+                    <div class="dual-range-fill" id="priceFill"></div>
+                    <input id="priceMin" type="range" min="300000" max="20000000" step="100000" value="500000" aria-label="Giá thấp nhất mỗi đêm">
+                    <input id="priceMax" type="range" min="300000" max="20000000" step="100000" value="8000000" aria-label="Giá cao nhất mỗi đêm">
+                  </div>
+                </div>
+              </div>
+
+              <div class="field sort-field">
+                <label for="sortMode">Sắp xếp</label>
+                <select id="sortMode">
+                  <option value="BEST">Phù hợp</option>
+                  <option value="PRICE_ASC">Giá ↑</option>
+                  <option value="PRICE_DESC">Giá ↓</option>
+                </select>
+              </div>
+
+              <button class="search-btn" onclick="run()">Dò căn trống</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <main class="wrap">
+      <div class="meta">
+        <div class="meta-left" id="meta">
+          Đang chọn khu vực <strong>Đà Lạt</strong>
+        </div>
+      </div>
+
+      <div id="errors" class="errors"></div>
+      <div id="grid" class="results"></div>
+      <div id="loadMoreWrap" class="load-more-wrap" style="display:none" aria-live="polite">
+        <div id="autoLoadStatus" class="auto-load-status">
+          <span class="auto-load-dot" aria-hidden="true"></span>
+          <span id="autoLoadText">Cuộn xuống để xem thêm</span>
+        </div>
+      </div>
+    </main>
+
+    <div class="floating-contact" aria-label="Liên hệ nhanh">
+      <a id="phoneFloat" class="float-btn phone" href="tel:0934616224" aria-label="Gọi điện">☎</a>
+      <a id="zaloFloat" class="float-btn zalo" href="https://zalo.me/0934616224" target="_blank" aria-label="Mở Zalo">Zalo</a>
+    </div>
+  </div>
+
+  <script>
+    const APP_CONFIG = {
+      brandName:"EHOME CHECK LỊCH & GIÁ HOMESTAY VILLA",
+
+      coverImages:[
+        "https://drive.google.com/thumbnail?id=1Ov7UhOK3ojZIctE63aR3J2oLorHJl_73&sz=w1800",
+        "https://drive.google.com/thumbnail?id=12VwNaBZQ0RmxzCW68zCnGD2IjtrBrZdd&sz=w1800"
+      ],
+
+      logoImage:
+        "https://drive.google.com/thumbnail?id=1hedzcsWq1ohttw0_hoWupvUBzd-yj2Rf&sz=w300",
+
+  
+
+      phone:"0934 616 224",
+      phoneRaw:"0934616224",
+      zaloUrl:"https://zalo.me/0934616224"
+    };
+
+    let selectedCity="Đà Lạt";
+    let lastData=null;
+    let coverSliderStarted=false;
+    let loadedResults=[];
+    let searchCursor=0;
+    let searchHasMore=false;
+    let lastSearchRequest=null;
+    let searchRequestInFlight=false;
+    let autoLoadScrollTicking=false;
+    let priceFilterTouched=false;
+    const SEARCH_PAGE_SIZE=12;
+    const AUTO_LOAD_DISTANCE_PX=700;
+
+    function esc(value){
+      return String(value==null?"":value).replace(/[&<>"']/g,function(m){
+        return {
+          "&":"&amp;",
+          "<":"&lt;",
+          ">":"&gt;",
+          '"':"&quot;",
+          "'":"&#39;"
+        }[m];
+      });
+    }
+
+    function pad2(v){
+      return String(v).padStart(2,"0");
+    }
+
+    function formatDateVN(value){
+      const s=String(value||"").trim();
+      const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m?m[3]+"/"+m[2]+"/"+m[1]:s;
+    }
+
+    function parseDateValue(value){
+      const s=String(value||"").trim();
+      let m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(m)return s;
+
+      m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+      if(!m)return "";
+
+      const d=+m[1];
+      const mo=+m[2];
+      const y=+m[3];
+      const dt=new Date(y,mo-1,d);
+
+      if(dt.getFullYear()!==y||dt.getMonth()!==mo-1||dt.getDate()!==d){
+        return "";
+      }
+
+      return y+"-"+pad2(mo)+"-"+pad2(d);
+    }
+
+    function applyBrandConfig(){
+      const phoneRaw=String(APP_CONFIG.phoneRaw||"").replace(/\D+/g,"");
+      const phoneText=String(APP_CONFIG.phone||phoneRaw).trim();
+      const zaloUrl=String(APP_CONFIG.zaloUrl||("https://zalo.me/"+phoneRaw)).trim();
+
+      document.getElementById("brandName").textContent=
+        APP_CONFIG.brandName||"EHOME CHECK LỊCH & GIÁ HOMESTAY VILLA";
+
+      ["phoneTop","phoneFloat"].forEach(function(id){
+        document.getElementById(id).href="tel:"+phoneRaw;
+      });
+
+      document.getElementById("phoneTop").textContent="☎ "+phoneText;
+
+      ["zaloTop","zaloFloat"].forEach(function(id){
+        document.getElementById(id).href=zaloUrl;
+      });
+
+      const logoUrl=String(APP_CONFIG.logoImage||"").trim();
+      const logoUrl2=String(APP_CONFIG.logoImage2||"").trim();
+
+      if(logoUrl){
+        const logo=document.getElementById("brandLogo");
+        const fallback=document.getElementById("brandFallback");
+        logo.src=logoUrl;
+        logo.style.display="block";
+        fallback.style.display="none";
+        logo.onerror=function(){
+          logo.style.display="none";
+          fallback.style.display="block";
+        };
+      }
+
+      if(logoUrl2){
+        const mark2=document.getElementById("brandMark2");
+        const logo2=document.getElementById("brandLogo2");
+        mark2.style.display="grid";
+        logo2.src=logoUrl2;
+        logo2.onerror=function(){
+          mark2.style.display="none";
+        };
+      }
+
+      startCoverSlider();
+    }
+
+    function startCoverSlider(){
+      if(coverSliderStarted)return;
+      coverSliderStarted=true;
+
+      const hero=document.getElementById("hero");
+      const images=(APP_CONFIG.coverImages||[])
+        .map(function(url){return String(url||"").trim();})
+        .filter(Boolean);
+
+      if(!images.length)return;
+
+      let index=0;
+
+      function showCover(){
+        hero.style.setProperty(
+          "--hero-image",
+          'url("'+images[index].replace(/"/g,"%22")+'")'
+        );
+        index=(index+1)%images.length;
+      }
+
+      showCover();
+
+      if(images.length>1){
+        setInterval(showCover,30000);
+      }
+    }
+
+    function setArea(city,button){
+      selectedCity=city;
+      document.querySelectorAll(".area").forEach(function(x){
+        x.classList.remove("active");
+      });
+      if(button)button.classList.add("active");
+
+      document.getElementById("meta").innerHTML=
+        'Đang chọn khu vực <strong>'+esc(city)+'</strong>';
+    }
+
+    function setLoading(isLoading){
+      document.getElementById("app").classList.toggle("loading",!!isLoading);
+    }
+
+    function buildNightRows(nights){
+      return (nights||[]).map(function(n){
+        return (
+          '<div class="night-row">'+
+            '<span>'+esc(formatDateVN(n.date))+'</span>'+
+            '<strong>'+esc(n.priceText||"")+'</strong>'+
+          '</div>'
+        );
+      }).join("");
+    }
+
+    function capacityBadgeText(v, requestedGuests){
+      const raw=String(v&&v.capacityLabel||v&&v.standard||"").trim();
+      const nums=(raw.match(/\d{1,3}/g)||[]).map(Number);
+      const min=Number(v&&v.capacityMin||nums[0]||0);
+      const max=Number(v&&v.capacityMax||(nums.length>1?nums[1]:nums[0])||0);
+      if(!min||!max){
+        return "Chưa xác định sức chứa";
+      }
+
+      const low=Math.min(min,max);
+      const high=Math.max(min,max);
+      const base=(low===high?String(low):(low+"–"+high))+" khách";
+      const guests=Number(requestedGuests||0);
+      if(!guests) return base;
+      if(guests>high) return base+" · thiếu "+(guests-high);
+      if(guests<low) return base+" · dưới mức chuẩn";
+      return base+" · phù hợp";
+    }
+
+    function buildVillaCard(v, requestedGuests){
+      const nights=Array.isArray(v.nightlyPrices)?v.nightlyPrices:[];
+      const firstLink=(nights.length&&nights[0].sourceLink)?nights[0].sourceLink:String(v&&v.sourceLink||"");
+      const availabilityStatus=String(v&&v.availabilityStatus||"CONFIRMED_FREE");
+      const availabilityBadge=availabilityStatus==="CONFIRMED_FREE"
+        ?"✅ Đã xác nhận trống"
+        :(availabilityStatus==="SNAPSHOT_FREE"?"✅ Trống theo dữ liệu đồng bộ":unknownBadgeLabelV1(v));
+      const imageHtml=v.image
+        ?'<div class="card-image"><img loading="lazy" src="'+esc(v.image)+'" alt="'+esc(v.name)+'" onerror="this.onerror=null;this.removeAttribute(\'src\');this.alt=\'Chua tai duoc anh\'"></div>'
+        :'<div class="card-image"></div>';
+
+      return (
+        '<div class="card" data-card-id="'+esc(v.villaId||"")+'">'+
+          imageHtml+
+          '<div class="card-body">'+
+            '<div class="card-title">'+esc(v.name||"")+'</div>'+
+            '<div class="card-sku">MÃ CĂN: '+esc(v.villaId||"—")+'</div>'+
+            '<div class="card-sub">'+
+              (v.city?'📍 '+esc(v.city)+' · ':'')+
+              esc(v.source||"")+
+            '</div>'+
+            '<div class="card-badges">'+
+              '<span class="badge">'+esc(capacityBadgeText(v,requestedGuests))+'</span>'+
+              '<span class="badge">'+esc(v.bedrooms||"?")+' PN</span>'+
+              '<span class="badge">'+esc(availabilityBadge)+'</span>'+
+              '<span class="badge">'+(v.priceConfidence==="EXACT"?"Giá xác định":"Giá cần xác nhận")+'</span>'+
+            '</div>'+
+            '<div class="price">'+esc(v.totalPriceText||"Liên hệ")+'</div>'+
+            '<div class="night-list">'+buildNightRows(nights)+'</div>'+
+            '<div class="btn-row">'+
+              (firstLink
+                ?'<a class="btn btn-primary" target="_blank" data-villa-id="'+esc(v.villaId||"")+'" onclick="trackInternalCalendarOpenV617(this.dataset.villaId)" href="'+esc(firstLink)+'">Mở Sheet lịch</a>'
+                :''
+              )+
+            '</div>'+
+          '</div>'+
+        '</div>'
+      );
+    }
+
+    function trackInternalCalendarOpenV617(villaId){
+      villaId=String(villaId||"").trim();
+      if(!villaId)return;
+      try{
+        google.script.run
+          .withFailureHandler(function(){})
+          .recordInternalVillaOpenV617(villaId);
+      }catch(ignorePriorityV617){}
+    }
+
+    function updateAutoLoadStatus(isLoading){
+      const wrap=document.getElementById("loadMoreWrap");
+      const status=document.getElementById("autoLoadStatus");
+      const text=document.getElementById("autoLoadText");
+      if(!wrap||!status||!text)return;
+
+      if(!searchHasMore){
+        wrap.style.display="none";
+        status.classList.remove("is-loading");
+        return;
+      }
+
+      wrap.style.display="flex";
+      status.classList.toggle("is-loading",!!isLoading);
+      text.textContent=isLoading?"Đang tải thêm căn...":"Cuộn xuống để xem thêm";
+    }
+
+    function maybeAutoLoadMore(){
+      if(!lastSearchRequest||!searchHasMore||searchRequestInFlight)return;
+
+      const doc=document.documentElement;
+      const distanceToBottom=Math.max(0,doc.scrollHeight-(window.scrollY+window.innerHeight));
+      if(distanceToBottom<=AUTO_LOAD_DISTANCE_PX){
+        loadMore();
+      }
+    }
+
+    function bindInfiniteScroll(){
+      window.addEventListener("scroll",function(){
+        if(autoLoadScrollTicking)return;
+        autoLoadScrollTicking=true;
+        window.requestAnimationFrame(function(){
+          autoLoadScrollTicking=false;
+          maybeAutoLoadMore();
+        });
+      },{passive:true});
+
+      window.addEventListener("resize",function(){
+        maybeAutoLoadMore();
+      },{passive:true});
+    }
+
+    function render(data,append){
+      if(!append)setLoading(false);
+      lastData=data||{};
+
+      const pageResults=Array.isArray(data&&data.results)?data.results:[];
+      loadedResults=append?loadedResults.concat(pageResults):pageResults.slice();
+      searchCursor=Number(data&&data.nextCursor||0);
+      searchHasMore=Boolean(data&&data.hasMore);
+
+      const checked=Number(data&&data.checkedVillas||0);
+      const elapsed=Number(data&&data.elapsedMs||0);
+      const totalChecked=Number(data&&data.totalCheckedVillas||checked);
+
+      const q=(data&&data.query)||{};
+      const priceNote=(Number(q.minPrice||0)>0||Number(q.maxPrice||0)>0)
+        ?' · lọc theo <strong>giá trung bình/đêm</strong>'
+        :'';
+      const liveConfirmedCount=loadedResults.filter(function(v){return String(v&&v.availabilityStatus||"CONFIRMED_FREE")==="CONFIRMED_FREE";}).length;
+      const snapshotFreeCount=loadedResults.filter(function(v){return String(v&&v.availabilityStatus||"")==="SNAPSHOT_FREE";}).length;
+      const unknownCount=Math.max(0,loadedResults.length-liveConfirmedCount-snapshotFreeCount);
+      document.getElementById("meta").innerHTML=
+        'Khu vực <strong>'+esc(q.city||selectedCity)+
+        '</strong> · đang hiển thị <strong id="totalCountV1">'+loadedResults.length+
+        '</strong> căn phù hợp'+
+        '<span id="liveWrapV1"'+(liveConfirmedCount?'':' style="display:none"')+'> · <strong id="liveCountV1">'+liveConfirmedCount+'</strong> đã xác nhận trống</span>'+
+        '<span id="snapWrapV1"'+(snapshotFreeCount?'':' style="display:none"')+'> · <strong id="snapCountV1">'+snapshotFreeCount+'</strong> trống theo đồng bộ</span>'+
+        '<span id="unkWrapV1"'+(unknownCount?'':' style="display:none"')+'> · <strong id="unkCountV1">'+unknownCount+'</strong> cần kiểm tra lịch / giá</span>'+
+        ' · lượt này xác minh <strong>'+checked+
+        '</strong> căn · '+(elapsed/1000).toFixed(1)+' giây'+priceNote;
+
+      const errors=Array.isArray(data&&data.errors)?data.errors:[];
+      document.getElementById("errors").innerHTML=errors.slice(0,10).map(function(e){
+        return (
+          '<div class="err"><strong>'+esc(e.source||"Nguồn")+'</strong> — '+
+          esc(e.name||"")+': '+esc(e.message||"")+'</div>'
+        );
+      }).join("");
+
+      const grid=document.getElementById("grid");
+
+      if(!loadedResults.length){
+        grid.innerHTML='<div class="empty">Không tìm thấy căn phù hợp trong lượt này.</div>';
+        updateAutoLoadStatus(false);
+        return;
+      }
+
+      const requestedGuests=Number(
+        data&&data.query&&data.query.guests||
+        lastSearchRequest&&lastSearchRequest.guests||
+        0
+      );
+
+      if(append){
+        const pageHtml=pageResults.map(function(v){
+          return buildVillaCard(v,requestedGuests);
+        }).join("");
+        if(pageHtml)grid.insertAdjacentHTML("beforeend",pageHtml);
+      }else{
+        grid.innerHTML=loadedResults.map(function(v){
+          return buildVillaCard(v,requestedGuests);
+        }).join("");
+      }
+
+      updateAutoLoadStatus(false);
+      window.setTimeout(maybeAutoLoadMore,120);
+      scheduleUnknownResolveV1();
+    }
+
+    /* ===== FIX4 (UnknownResolver.js): doc that noi sau cho the "Can kiem tra lich / gia" ===== */
+    var resolveInFlightV1=false;
+    var resolveAttemptsV1={};
+    var RESOLVE_BATCH_V1=5;
+    var RESOLVE_MAX_ATTEMPTS_V1=2;
+
+    function unknownBadgeLabelV1(v){
+      var r=String(v&&v.liveReason||"");
+      if(r==="DATE_NOT_FOUND"||r==="DATE_COLUMN_NOT_FOUND"||r==="SNAPSHOT_DATE_CELL_NOT_FOUND")return "📅 Chưa mở lịch tháng này – hỏi chủ nhà";
+      if(r==="PERMISSION_DENIED")return "🔒 Chưa có quyền đọc lịch";
+      if(r==="VILLA_COLUMN_NOT_FOUND")return "⚠️ Không thấy cột căn trong lịch";
+      if(r==="DEADLINE_EXCEEDED")return "⏱ Đọc lịch quá lâu – thử lại sau ít phút";
+      if(r==="SOURCE_READ_FAILED")return "⚠️ File lịch của nguồn đọc không được – báo admin";
+      if(r==="NO_CALENDAR_ACTIVITY")return "📅 Lịch chưa có dữ liệu ngày này – hỏi chủ nhà";
+      if(r==="LIVE_READ_FAILED"||r==="SNAPSHOT_UNKNOWN_STATE")return "⚠️ Chưa đọc được lịch (tab tháng hoặc file có thể lỗi) – thử lại, vẫn lỗi thì báo admin";
+      if(r)return "⚠️ Đọc lịch chưa được ("+r+")";
+      return "⏳ Cần kiểm tra lịch / giá";
+    }
+
+    function findCardElV1(id){
+      var kids=document.getElementById("grid").children;
+      for(var i=0;i<kids.length;i++){
+        if(kids[i].getAttribute&&kids[i].getAttribute("data-card-id")===id)return kids[i];
+      }
+      return null;
+    }
+
+    function setWrapV1(wrapId,countId,n){
+      var w=document.getElementById(wrapId),c=document.getElementById(countId);
+      if(c)c.textContent=String(n);
+      if(w)w.style.display=n>0?"":"none";
+    }
+
+    function refreshCountsV1(pending){
+      var live=0,snap=0,unk=0;
+      loadedResults.forEach(function(v){
+        var s=String(v&&v.availabilityStatus||"CONFIRMED_FREE");
+        if(s==="CONFIRMED_FREE")live++;
+        else if(s==="SNAPSHOT_FREE")snap++;
+        else unk++;
+      });
+      var t=document.getElementById("totalCountV1");
+      if(t)t.textContent=String(loadedResults.length);
+      setWrapV1("liveWrapV1","liveCountV1",live);
+      setWrapV1("snapWrapV1","snapCountV1",snap);
+      setWrapV1("unkWrapV1","unkCountV1",unk);
+      var meta=document.getElementById("meta");
+      if(!meta)return;
+      var note=document.getElementById("ratioNoteV1");
+      if(!note){
+        note=document.createElement("div");
+        note.id="ratioNoteV1";
+        note.style.cssText="margin-top:4px;font-size:12px;opacity:.8";
+        meta.appendChild(note);
+      }
+      var total=loadedResults.length;
+      if(!total){note.textContent="";return;}
+      var pct=function(n){return Math.round(n*100/total);};
+      note.textContent="Nguồn kết quả: "+pct(snap)+"% snapshot · "+pct(live)+"% đọc thật · "+pct(unk)+"% chưa xác định"+(pending>0?" · đang đọc thật "+pending+" căn...":"");
+    }
+
+    function pendingUnknownIdsV1(){
+      return loadedResults.filter(function(v){
+        var id=String(v&&v.villaId||"");
+        return id&&String(v&&v.availabilityStatus||"")==="UNKNOWN"&&!v.liveTried&&Number(resolveAttemptsV1[id]||0)<RESOLVE_MAX_ATTEMPTS_V1;
+      }).map(function(v){return String(v.villaId);});
+    }
+
+    function applyResolvedV1(res){
+      if(!res||!res.success)return;
+      var grid=document.getElementById("grid");
+      var guests=Number(lastSearchRequest&&lastSearchRequest.guests||0);
+      function indexOfId(id){
+        for(var i=0;i<loadedResults.length;i++){
+          if(String(loadedResults[i]&&loadedResults[i].villaId||"")===id)return i;
+        }
+        return -1;
+      }
+      function removeId(id){
+        var i=indexOfId(id);
+        if(i>=0)loadedResults.splice(i,1);
+        var el=findCardElV1(id);
+        if(el&&el.parentNode)el.parentNode.removeChild(el);
+      }
+      function repaint(id){
+        var i=indexOfId(id),el=findCardElV1(id);
+        if(i>=0&&el)el.outerHTML=buildVillaCard(loadedResults[i],guests);
+      }
+      (res.freeCards||[]).forEach(function(card){
+        var id=String(card&&card.villaId||"");
+        var i=indexOfId(id);
+        if(i<0)return;
+        card.availabilityStatus="CONFIRMED_FREE";
+        loadedResults[i]=card;
+        repaint(id);
+      });
+      (res.busyIds||[]).concat(res.hiddenIds||[]).forEach(removeId);
+      (res.deniedIds||[]).forEach(function(id){
+        var i=indexOfId(id);
+        if(i>=0){loadedResults[i].liveReason="PERMISSION_DENIED";loadedResults[i].liveTried=true;repaint(id);}
+      });
+      Object.keys(res.failed||{}).forEach(function(id){
+        var i=indexOfId(id);
+        if(i>=0){loadedResults[i].liveReason=String(res.failed[id]||"LIVE_READ_FAILED");loadedResults[i].liveTried=true;repaint(id);}
+      });
+      if(!loadedResults.length&&grid)grid.innerHTML='<div class="empty">Không tìm thấy căn phù hợp trong lượt này.</div>';
+    }
+
+    function scheduleUnknownResolveV1(){
+      refreshCountsV1(pendingUnknownIdsV1().length);
+      if(resolveInFlightV1||!lastSearchRequest)return;
+      if(searchRequestInFlight){window.setTimeout(scheduleUnknownResolveV1,800);return;}
+      var pend=pendingUnknownIdsV1();
+      if(!pend.length)return;
+      var batch=pend.slice(0,RESOLVE_BATCH_V1);
+      batch.forEach(function(id){resolveAttemptsV1[id]=Number(resolveAttemptsV1[id]||0)+1;});
+      var seed=lastSearchRequest.shuffleSeed;
+      resolveInFlightV1=true;
+      google.script.run
+        .withSuccessHandler(function(res){
+          resolveInFlightV1=false;
+          if(lastSearchRequest&&lastSearchRequest.shuffleSeed===seed)applyResolvedV1(res||{});
+          window.setTimeout(scheduleUnknownResolveV1,150);
+        })
+        .withFailureHandler(function(){
+          resolveInFlightV1=false;
+          window.setTimeout(scheduleUnknownResolveV1,1500);
+        })
+        .apiResolveUnknownVillasV1({
+          checkIn:lastSearchRequest.checkIn,checkOut:lastSearchRequest.checkOut,
+          guests:lastSearchRequest.guests,villaIds:batch
+        });
+    }
+
+    function requestSearch(request,append){
+      if(searchRequestInFlight)return;
+      searchRequestInFlight=true;
+
+      if(append){
+        updateAutoLoadStatus(true);
+      }else{
+        setLoading(true);
+        document.getElementById("meta").innerHTML=
+          'Đang dò lịch thật tại khu vực <strong>'+esc(selectedCity)+'</strong>...';
+        document.getElementById("errors").innerHTML="";
+        document.getElementById("grid").innerHTML="";
+        document.getElementById("loadMoreWrap").style.display="none";
+      }
+
+      google.script.run
+        .withSuccessHandler(function(data){
+          searchRequestInFlight=false;
+          render(data,append);
+        })
+        .withFailureHandler(function(err){
+          searchRequestInFlight=false;
+          if(!append)setLoading(false);
+          updateAutoLoadStatus(false);
+          alert(err&&err.message?err.message:err);
+        })
+        .apiSearchVillas(request);
+    }
+
+    function loadMore(){
+      if(!lastSearchRequest||!searchHasMore||searchRequestInFlight)return;
+
+      const request=Object.assign({},lastSearchRequest,{
+        cursor:searchCursor,
+        pageSize:SEARCH_PAGE_SIZE
+      });
+
+      requestSearch(request,true);
+    }
+
+    function run(){
+      const ci=parseDateValue(document.getElementById("ci").value);
+      const co=parseDateValue(document.getElementById("co").value);
+      const guests=Number(document.getElementById("guests").value);
+      const productType=String(document.getElementById("productType").value||"NGUYEN_CAN");
+      const bedrooms=Number(document.getElementById("bedrooms").value||0);
+      const sliderMinNightPrice=Number(document.getElementById("priceMin").value||0);
+      const sliderMaxNightPrice=Number(document.getElementById("priceMax").value||0);
+      // V3.4.1: 500k–8tr chỉ là khoảng gợi ý ban đầu, không phải bộ lọc ngầm.
+      // Chỉ bật lọc giá sau khi người dùng thực sự kéo thanh giá.
+      const isPrivateRoomV342=productType==="PHONG_RIENG";
+      const minNightPrice=(!isPrivateRoomV342&&priceFilterTouched)?sliderMinNightPrice:0;
+      const maxNightPrice=(!isPrivateRoomV342&&priceFilterTouched)?sliderMaxNightPrice:0;
+      const sortMode=String(document.getElementById("sortMode").value||"BEST");
+
+      if(!ci||!co){
+        alert("Anh chọn ngày theo dạng ngày/tháng/năm.");
+        return;
+      }
+
+      if(co<=ci){
+        alert("Ngày trả phải sau ngày nhận.");
+        return;
+      }
+
+      if(!guests||guests<1){
+        alert("Anh nhập số lượng khách.");
+        return;
+      }
+
+      const checkInDate=new Date(ci+"T00:00:00");
+      const checkOutDate=new Date(co+"T00:00:00");
+      const stayNights=Math.max(1,Math.round((checkOutDate-checkInDate)/86400000));
+      const minPrice=minNightPrice>0?Math.round(minNightPrice*stayNights):0;
+      const maxPrice=maxNightPrice>0?Math.round(maxNightPrice*stayNights):0;
+
+      if(!isPrivateRoomV342&&priceFilterTouched&&sliderMinNightPrice>0&&sliderMaxNightPrice>0&&sliderMaxNightPrice<sliderMinNightPrice){
+        alert("Giá cao nhất/đêm phải lớn hơn hoặc bằng giá thấp nhất/đêm.");
+        return;
+      }
+
+      loadedResults=[];
+      searchCursor=0;
+      searchHasMore=false;
+
+      // V3.4.0: seed mới cho MỖI lần bấm search; load-more giữ nguyên seed.
+      const shuffleSeed=Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,10);
+
+      lastSearchRequest={
+        checkIn:ci,
+        checkOut:co,
+        guests:guests,
+        city:selectedCity,
+        cursor:0,
+        pageSize:SEARCH_PAGE_SIZE,
+        minPrice:minPrice,
+        maxPrice:maxPrice,
+        minNightPrice:minNightPrice,
+        maxNightPrice:maxNightPrice,
+        stayNights:stayNights,
+        sortMode:sortMode,
+        shuffleSeed:shuffleSeed,
+        productType:productType,
+        bedrooms:bedrooms
+      };
+
+      requestSearch(lastSearchRequest,false);
+    }
+
+
+    function onProductTypeChangeV342(){
+      const type=String(document.getElementById("productType").value||"NGUYEN_CAN");
+      const privateRoom=type==="PHONG_RIENG";
+      const priceField=document.getElementById("priceFieldV342");
+      const bedroomsField=document.getElementById("bedroomsFieldV342");
+      if(priceField) priceField.style.display=privateRoom?"none":"";
+      // Phòng đơn không cần lọc PN; giữ giá trị nhưng không dùng bằng cách reset về tất cả.
+      if(privateRoom){
+        document.getElementById("bedrooms").value="0";
+        if(bedroomsField) bedroomsField.style.opacity="0.55";
+      }else{
+        if(bedroomsField) bedroomsField.style.opacity="";
+      }
+    }
+
+    function formatPriceShort(v){
+      v=Number(v)||0;
+      if(v<1000000)return Math.round(v/1000)+"k";
+      const m=v/1000000;
+      return (Number.isInteger(m)?m:m.toFixed(1).replace(".",","))+"tr";
+    }
+
+    function bindPriceRange(){
+      const minEl=document.getElementById("priceMin");
+      const maxEl=document.getElementById("priceMax");
+      const minLabel=document.getElementById("priceMinLabel");
+      const maxLabel=document.getElementById("priceMaxLabel");
+      const fill=document.getElementById("priceFill");
+      if(!minEl||!maxEl||!minLabel||!maxLabel||!fill)return;
+
+      const gap=100000;
+      const update=function(changed){
+        let minV=Number(minEl.value);
+        let maxV=Number(maxEl.value);
+        if(maxV-minV<gap){
+          if(changed==="min")minV=maxV-gap;
+          else maxV=minV+gap;
+          minEl.value=minV;
+          maxEl.value=maxV;
+        }
+        minLabel.textContent=formatPriceShort(minV);
+        maxLabel.textContent=formatPriceShort(maxV);
+        const low=(minV-Number(minEl.min))/(Number(minEl.max)-Number(minEl.min))*100;
+        const high=(maxV-Number(maxEl.min))/(Number(maxEl.max)-Number(maxEl.min))*100;
+        fill.style.left=low+"%";
+        fill.style.right=(100-high)+"%";
+      };
+
+      minEl.addEventListener("input",function(){
+        priceFilterTouched=true;
+        update("min");
+      });
+      maxEl.addEventListener("input",function(){
+        priceFilterTouched=true;
+        update("max");
+      });
+      update();
+    }
+
+    function initPickers(){
+      if(typeof flatpickr==="undefined")return;
+
+      flatpickr.localize(flatpickr.l10ns.vn);
+
+      const ciPicker=flatpickr("#ci",{
+        dateFormat:"Y-m-d",
+        altInput:true,
+        altFormat:"d/m/Y",
+        allowInput:true,
+        disableMobile:true,
+        minDate:"today",
+        onChange:function(selectedDates){
+          if(selectedDates.length){
+            coPicker.set("minDate",selectedDates[0]);
+          }
+        }
+      });
+
+      const coPicker=flatpickr("#co",{
+        dateFormat:"Y-m-d",
+        altInput:true,
+        altFormat:"d/m/Y",
+        allowInput:true,
+        disableMobile:true,
+        minDate:"today"
+      });
+    }
+
+    applyBrandConfig();
+    bindPriceRange();
+    initPickers();
+    bindInfiniteScroll();
+  </script>
+</body>
+</html>
