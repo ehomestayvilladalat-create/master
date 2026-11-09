@@ -706,7 +706,11 @@ function expandMasterMergedCells(sheet, values, formulas, cachedMergedRangesV21)
  * NAME_MODE=FIXED_ROW;NAME_ROW=4
  * START_COL=3;TOP_ROWS=12;FALLBACK=TRUE
  */
+// B3: cảnh báo của lần đọc layout gần nhất (buildMasterVilla lấy ra sau mỗi nguồn).
+var BE_B3_LAST_WARNINGS_V1 = [];
+
 function readMasterFromColumnLayout(values, formulas, rawConfig) {
+  BE_B3_LAST_WARNINGS_V1 = [];
   if (!values || !values.length || !values[0]) return [];
 
   const config = parseMasterColumnConfig(rawConfig);
@@ -796,6 +800,21 @@ Logger.log(JSON.stringify(config));
       isVillaColumn: !!name
     });
   }
+  // B3: cột trong vùng cấu hình có giá ở các hàng ngày nhưng hàng tên trống => cảnh báo,
+  // không còn bỏ qua im lặng (Kimi H/O, thảo anh D/F).
+  try {
+    BE_B3_LAST_WARNINGS_V1 = beFindNamelessPriceColumnsB3_(values, config, nameDetection, columns, lastColumnExclusive);
+    if (BE_B3_LAST_WARNINGS_V1.length) {
+      Logger.log(JSON.stringify({
+        level:"WARNING", code:"PRICE_COLUMN_WITHOUT_NAME_B3",
+        nameRow: nameDetection && nameDetection.row >= 0 ? nameDetection.row + 1 : 0,
+        columns: BE_B3_LAST_WARNINGS_V1
+      }));
+    }
+  } catch (b3Error) {
+    BE_B3_LAST_WARNINGS_V1 = [];
+  }
+
 columns.forEach(function(c) {
   if (c.columnIndex <= 5) {
     Logger.log(
@@ -813,6 +832,46 @@ columns.forEach(function(c) {
   if (!range) return [];
 
   return buildMasterVillaObjects(columns, range);
+}
+
+/** B3 - ô trông như giá: "3500", "6000 duy", "2.500.000", "1.5tr", "800k". Không nhận ngày "1/11", số nhỏ "4". */
+function beLooksLikePriceCellB3_(text) {
+  var s = String(text == null ? "" : text).trim();
+  if (!s) return false;
+  if (/^\d+(?:[.,]\d+)?\s*(?:tr|triệu|trieu|k)(?![a-zà-ỹ])/i.test(s)) return true;
+  var m = s.match(/^(\d{1,3}(?:[.,]\d{3})+|\d{3,7})(?![\d\/])/);
+  return !!m;
+}
+
+/**
+ * B3 - Trả danh sách cột trong vùng cấu hình mà hàng tên trống nhưng có >= 3 ô giá
+ * ở các hàng dưới hàng tên. Thuần, test được.
+ */
+function beFindNamelessPriceColumnsB3_(values, config, nameDetection, columns, lastColumnExclusive) {
+  var out = [];
+  if (!values || !values.length || !config) return out;
+  var nameRow = nameDetection && nameDetection.row >= 0 ? nameDetection.row : -1;
+  if (nameRow < 0 && config.nameMode === "FIXED_ROW" && config.fixedNameRowIndex >= 0) nameRow = config.fixedNameRowIndex;
+  if (nameRow < 0) return out;
+  var named = {};
+  (columns || []).forEach(function(c) { if (c && c.isVillaColumn) named[c.columnIndex] = true; });
+  var excluded = config.excludedColumnIndexes || [];
+  var lastRow = Math.min(values.length, nameRow + 1 + 70);
+  for (var c = Number(config.startColumnIndex || 0); c < lastColumnExclusive; c++) {
+    if (named[c] || excluded.indexOf(c) >= 0) continue;
+    var hits = 0, samples = [];
+    for (var r = nameRow + 1; r < lastRow; r++) {
+      var cell = values[r] ? values[r][c] : "";
+      if (beLooksLikePriceCellB3_(cell)) {
+        hits++;
+        if (samples.length < 3) samples.push(String(cell).trim().slice(0, 30));
+      }
+    }
+    if (hits >= 3) {
+      out.push({column: c + 1, letter: beColumnLetterV38_(c + 1), nameRow: nameRow + 1, priceCells: hits, samples: samples});
+    }
+  }
+  return out;
 }
 
 function hasMasterExplicitStartColumn(rawConfig) {
@@ -1778,15 +1837,116 @@ function beCalendarSheetDescriptorV4210_(sheetName, referenceDate) {
     }
   }
   if (month && !year && typeof ceYearFromSheetNameV1_ === "function") year = ceYearFromSheetNameV1_(raw) || 0;
-  if (month && !year) year = currentYear;
+
+  /*
+   * B4 - KHÔNG đoán năm mù cho tên tab.
+   * - Tên có năm hợp lệ: dùng năm đó (yearSource=NAME).
+   * - Tên không có năm ("Tháng 1"): chọn năm làm tháng gần tháng tham chiếu nhất
+   *   trong ±1 tháng (Tháng 1 xem vào tháng 12/2026 => 1/2027; Tháng 12 xem vào
+   *   tháng 1/2027 => 12/2026). Ngoài cửa sổ ±1 giữ mặc định năm hiện tại như cũ
+   *   để tab tháng cũ vẫn bị coi là cũ (yearSource=NONE).
+   * - Tên có số năm SAI ("Th 01.1027"): chỉ nhận khi tháng nằm trong ±1 tháng;
+   *   ngoài cửa sổ thì KHÔNG nhận tab là tháng nào (recognized=false), ghi cảnh báo
+   *   (yearSource=INVALID).
+   */
+  var yearSourceB4 = year ? "NAME" : "NONE";
+  if (month && !year && beSheetNameHasInvalidYearB4_(raw)) yearSourceB4 = "INVALID";
+  if (month && !year) {
+    var nearYearB4 = beNearestYearForMonthB4_(month, referenceDate, 1);
+    if (nearYearB4) year = nearYearB4;
+    else if (yearSourceB4 === "NONE") year = currentYear;
+  }
 
   return {
-    recognized:month >= 1 && month <= 12,
+    recognized:month >= 1 && month <= 12 && year > 0,
     combined:false,
     month:month,
     year:year,
-    name:raw
+    name:raw,
+    yearSource:yearSourceB4
   };
+}
+
+/** B4 - năm gần nhất để (năm, tháng) cách tháng tham chiếu tối đa maxDiff tháng; 0 nếu không có. */
+function beNearestYearForMonthB4_(month, referenceDate, maxDiff) {
+  month = Number(month || 0);
+  if (!(month >= 1 && month <= 12)) return 0;
+  referenceDate = referenceDate instanceof Date ? referenceDate : new Date();
+  var refIndex = referenceDate.getFullYear() * 12 + referenceDate.getMonth();
+  var best = 0, bestDiff = 999;
+  for (var y = referenceDate.getFullYear() - 1; y <= referenceDate.getFullYear() + 1; y++) {
+    var diff = Math.abs(y * 12 + (month - 1) - refIndex);
+    if (diff < bestDiff) { bestDiff = diff; best = y; }
+  }
+  return bestDiff <= Number(maxDiff == null ? 1 : maxDiff) ? best : 0;
+}
+
+/** B4 - tên tab có cụm số trông như năm nhưng không đọc được năm hợp lệ (vd "1027", "2O27"). */
+function beSheetNameHasInvalidYearB4_(raw) {
+  var runs = String(raw || "").match(/\d{3,}/g) || [];
+  return runs.some(function(run) {
+    if (/^20\d{2}$/.test(run)) return false;
+    if (typeof ceYearFromDigitsV1_ === "function" && ceYearFromDigitsV1_(run)) return false;
+    return true;
+  });
+}
+
+/**
+ * B4/A6 - Đọc nhanh tab (tối đa 45 hàng x 8 cột đầu) để đối chiếu cột THỨ với NGÀY.
+ * Trả năm trong candidateYears mà toàn bộ cặp (ngày, thứ) khớp; 0 nếu không đủ bằng chứng.
+ */
+function beTabWeekdayYearB4_(sheet, month, candidateYears) {
+  if (!sheet || typeof sheet.getRange !== "function") return {year:0, pairs:0};
+  var values;
+  try {
+    var rows = Math.min(45, Math.max(1, sheet.getLastRow()));
+    var cols = Math.min(8, Math.max(1, sheet.getLastColumn()));
+    values = sheet.getRange(1, 1, rows, cols).getDisplayValues();
+  } catch (e) {
+    return {year:0, pairs:0, error:String(e && e.message || e)};
+  }
+  return beWeekdayYearFromValuesB4_(values, month, candidateYears);
+}
+
+/** Thuần, test được: values là mảng 2 chiều display values. */
+function beWeekdayYearFromValuesB4_(values, month, candidateYears) {
+  var weekdayOf = function(text) {
+    var t = normalizeMasterText(text).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    if (!t) return -1;
+    if (/^(cn|chu nhat|sun|sunday)$/.test(t)) return 0;
+    var m = t.match(/^(?:t|thu)\s*([2-7])$/);
+    if (m) return Number(m[1]) - 1;
+    var words = {"thu hai":1,"thu ba":2,"thu tu":3,"thu nam":4,"thu sau":5,"thu bay":6,
+      mon:1,monday:1,tue:2,tuesday:2,wed:3,wednesday:3,thu:4,thursday:4,fri:5,friday:5,sat:6,saturday:6};
+    return Object.prototype.hasOwnProperty.call(words, t) ? words[t] : -1;
+  };
+  var dayOf = function(text) {
+    var s = String(text || "").trim();
+    var m = s.match(/^0?([1-9]|[12]\d|3[01])(?:\s*[\/.\-]\s*0?(\d{1,2})(?:\s*[\/.\-]\s*\d{2,4})?)?$/);
+    if (!m) return 0;
+    if (m[2] && Number(m[2]) !== Number(month)) return 0;
+    return Number(m[1]);
+  };
+  var pairs = [];
+  (values || []).forEach(function(row) {
+    var wd = -1, day = 0;
+    (row || []).forEach(function(cell) {
+      if (wd < 0) { var w = weekdayOf(cell); if (w >= 0) { wd = w; return; } }
+      if (!day) day = dayOf(cell);
+    });
+    if (wd >= 0 && day) pairs.push([day, wd]);
+  });
+  if (pairs.length < 5) return {year:0, pairs:pairs.length};
+  // Một năm được nhận khi >= 90% cặp (ngày, thứ) khớp và chỉ có đúng một năm như vậy.
+  var need = Math.max(5, Math.ceil(pairs.length * 0.9));
+  var matching = (candidateYears || []).filter(function(y) {
+    var hit = pairs.filter(function(p) {
+      var d = new Date(Number(y), Number(month) - 1, p[0]);
+      return d.getMonth() === Number(month) - 1 && d.getDay() === p[1];
+    }).length;
+    return hit >= need;
+  });
+  return {year: matching.length === 1 ? matching[0] : 0, pairs: pairs.length, matching: matching};
 }
 
 function beIsCalendarLikeUnknownV4210_(sheet) {
@@ -1824,6 +1984,9 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
     explicitName = "";
   }
 
+  // B4: cảnh báo tên tab (năm sai / năm không khớp thứ-ngày trong tab).
+  var warningsB4 = [];
+
   if (explicitName) {
     var configured = beFindVisibleSheetByLooseNameV4210_(file, explicitName);
     if (configured) {
@@ -1832,7 +1995,8 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
         configured:explicitName,
         sheet:configured.getName()
       }));
-      return {sheet:configured, mode:"CONFIG", inactiveWindow:false, configured:explicitName};
+      beCollectTabYearWarningsB4_(configured, referenceDate, warningsB4);
+      return {sheet:configured, mode:"CONFIG", inactiveWindow:false, configured:explicitName, warnings:warningsB4};
     }
     Logger.log(JSON.stringify({
       level:"WARNING",code:"MASTER_CALENDAR_CONFIG_FALLBACK_V4210",
@@ -1870,6 +2034,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
   var currentVisible=[], previousVisible=[], nextVisible=[], unknown=[];
   candidates.forEach(function(sheet){
     var d = beCalendarSheetDescriptorV4210_(sheet.getName(), referenceDate);
+    beCollectTabYearWarningsB4_(sheet, referenceDate, warningsB4, d);
     if (same_(d,current)) currentVisible.push(sheet);
     else if (same_(d,previous)) previousVisible.push(sheet);
     else if (same_(d,next)) nextVisible.push(sheet);
@@ -1902,8 +2067,10 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
     // V4.22.4 FIX: không fallback vào tab tháng cũ hơn tháng trước (stale).
     // Tab không nhận ra được tháng (ví dụ "CHẠNG VẠNG") vẫn fallback như cũ.
     var soleDescV4224 = beCalendarSheetDescriptorV4210_(candidates[0].getName(), referenceDate);
-    var soleIsStaleV4224 = soleDescV4224.recognized &&
-      (soleDescV4224.year * 12 + soleDescV4224.month) < (previous.year * 12 + previous.month);
+    var soleIsStaleV4224 = (soleDescV4224.recognized &&
+      (soleDescV4224.year * 12 + soleDescV4224.month) < (previous.year * 12 + previous.month)) ||
+      // B4: tab có năm sai và nằm ngoài cửa sổ tháng hiện tại không được dùng làm fallback.
+      (soleDescV4224.yearSource === "INVALID" && !soleDescV4224.recognized);
     if (!soleIsStaleV4224) {
       chosen = candidates[0];
       mode = "SOLE_VISIBLE_NON_INFO_FALLBACK_V4223";
@@ -1916,7 +2083,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
       sheet:chosen.getName(),mode:mode,
       currentMonth:current.month,currentYear:current.year
     }));
-    return {sheet:chosen, mode:mode, inactiveWindow:false, configured:explicitName};
+    return {sheet:chosen, mode:mode, inactiveWindow:false, configured:explicitName, warnings:warningsB4};
   }
 
   var recognizedVisible = candidates.filter(function(sheet){
@@ -1929,10 +2096,43 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
       visibleMonthSheets:recognizedVisible.map(function(sheet){return sheet.getName();}),
       action:"DO_NOT_REUSE_STALE_MONTH_VILLAS"
     }));
-    return {sheet:null, mode:"INACTIVE_WINDOW", inactiveWindow:true, configured:explicitName};
+    return {sheet:null, mode:"INACTIVE_WINDOW", inactiveWindow:true, configured:explicitName, warnings:warningsB4};
   }
 
-  return {sheet:null, mode:"NO_CALENDAR", inactiveWindow:false, configured:explicitName};
+  return {sheet:null, mode:"NO_CALENDAR", inactiveWindow:false, configured:explicitName, warnings:warningsB4};
+}
+
+/**
+ * B4/A6 - Ghi cảnh báo cho một tab:
+ * - SHEET_NAME_YEAR_INVALID_B4: tên tab có số năm sai (vd "Th 01.1027").
+ * - SHEET_NAME_YEAR_MISMATCH_B4: tên tab ghi năm X nhưng thứ-ngày trong tab là năm Y
+ *   (vd "Tháng 11.2025" mà ngày 1 là Chủ nhật => 11/2026). Chỉ đọc nội dung tab khi
+ *   tháng của tab nằm trong ±1 tháng hiện tại mà năm trên tên lệch => rất ít lần đọc.
+ * Không tự đổi tab được chọn: chủ nguồn cần sửa tên tab.
+ */
+function beCollectTabYearWarningsB4_(sheet, referenceDate, warnings, descriptor) {
+  try {
+    var name = String(sheet && sheet.getName ? sheet.getName() : "");
+    var d = descriptor || beCalendarSheetDescriptorV4210_(name, referenceDate);
+    if (!d || d.combined) return;
+    if (d.yearSource === "INVALID") {
+      warnings.push({code:"SHEET_NAME_YEAR_INVALID_B4", sheet:name,
+        message:"Tên tab \"" + name + "\" có số năm không hợp lệ" +
+          (d.recognized ? "; tạm hiểu là tháng " + d.month + "/" + d.year : "; không nhận là tab tháng nào")});
+      return;
+    }
+    if (!d.recognized || d.yearSource !== "NAME") return;
+    var near = beNearestYearForMonthB4_(d.month, referenceDate, 1);
+    if (!near || near === d.year) return;
+    var check = beTabWeekdayYearB4_(sheet, d.month, [d.year, near]);
+    if (check.year && check.year !== d.year) {
+      warnings.push({code:"SHEET_NAME_YEAR_MISMATCH_B4", sheet:name, nameYear:d.year, contentYear:check.year,
+        message:"Tab \"" + name + "\" ghi năm " + d.year + " nhưng thứ-ngày trong tab là tháng " +
+          d.month + "/" + check.year + ". Cần đổi tên tab."});
+    }
+  } catch (e) {
+    Logger.log(JSON.stringify({level:"WARNING",code:"TAB_YEAR_CHECK_FAILED_B4",error:String(e && e.message || e)}));
+  }
 }
 
 function beFindMasterCalendarSheetV4210_(file, rawCalendarConfig, referenceDate) {
@@ -3692,6 +3892,8 @@ function buildMasterVilla(options){
 
   var result = [];
   var sourceStatuses = [];
+  // B3/B4: cảnh báo theo dòng MASTER, gắn vào cột trạng thái cuối build.
+  var warningsByRowB34 = {};
   var opened = 0;
   var imageDiagnostics = {
     detected: 0,
@@ -3828,6 +4030,7 @@ function buildMasterVilla(options){
       );
       var calendarSheet = calendarSelectionV4210.sheet;
       var inactiveCalendarWindowV4210 = calendarSelectionV4210.inactiveWindow === true;
+      beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, calendarSelectionV4210.warnings);
       var imageSheet = calendarSheet;
       var infoSheet = calendarSheet;
       var hasExplicitImageSupplementV414 = beHasExplicitMetadataSheetV38_(imageConfig);
@@ -3976,9 +4179,18 @@ function buildMasterVilla(options){
         }
       }
 
+      BE_B3_LAST_WARNINGS_V1 = [];
       var calendarVillas = calendarSheet
         ? readMasterFromCalendarSheet(calendarSheet, runtimeMasterConfigV340)
         : [];
+      if ((BE_B3_LAST_WARNINGS_V1 || []).length) {
+        var b3Letters = BE_B3_LAST_WARNINGS_V1.map(function(w) { return w.letter; });
+        beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, [{
+          code:"PRICE_COLUMN_WITHOUT_NAME_B3",
+          message:"cột " + b3Letters.join(", ") + " có giá nhưng hàng tên (hàng " +
+            BE_B3_LAST_WARNINGS_V1[0].nameRow + ") trống - căn ở cột này đang bị bỏ qua"
+        }]);
+      }
 
       /*
        * V3.9 - Một căn có thể dùng một vùng tên merge và nhiều cột giá/lịch.
@@ -4668,6 +4880,7 @@ function buildMasterVilla(options){
   if (!incrementalModeV328) {
     output.autoResizeColumns(1, outputHeaders.length);
   }
+  beApplySourceWarningsB34_(sourceStatuses, warningsByRowB34, rows);
   beWriteMasterStatuses_(master, rows[0], sourceStatuses);
   beSyncMissingImageOverridesV35_(
     imageOverrideStore.sheet,
@@ -6110,6 +6323,46 @@ function beWriteMasterStatuses_(sheet,headerRow,statuses){
   updateColumn_(h.status,function(x){return x.status;});
   updateColumn_(h.lastSync,function(x){return x.time;});
 }
+/** B3/B4 - gom cảnh báo theo dòng MASTER (không trùng lặp). */
+function beAddSourceWarningsB34_(store, row, warnings) {
+  if (!store || !row || !warnings || !warnings.length) return;
+  var list = store[row] = store[row] || [];
+  warnings.forEach(function(w) {
+    var msg = String(w && w.message || w && w.code || "");
+    if (msg && list.indexOf(msg) < 0) list.push(msg);
+  });
+}
+
+/** B3/B4 - gắn cảnh báo vào trạng thái nguồn + 1 sự kiện tổng hợp mỗi build. */
+function beApplySourceWarningsB34_(statuses, store, masterRows) {
+  var rowsWithWarnings = Object.keys(store || {});
+  if (!rowsWithWarnings.length) return;
+  var touched = {};
+  (statuses || []).forEach(function(st) {
+    var list = store[Number(st && st.row || 0)];
+    if (!list || !list.length) return;
+    st.status = String(st.status || "") + " | ⚠ " + list.join("; ");
+    touched[st.row] = true;
+  });
+  var hMap = masterRows && masterRows.length ? beHeaderMap_(masterRows[0]) : null;
+  var summary = rowsWithWarnings.map(function(row) {
+    var mrow = masterRows && masterRows[Number(row) - 1] || [];
+    return {
+      row:Number(row),
+      sourceId:hMap ? cleanMasterText(beGetByHeader_(mrow, hMap.id)) : "",
+      source:hMap ? cleanMasterText(beGetByHeader_(mrow, hMap.source)) : "",
+      warnings:store[row]
+    };
+  });
+  Logger.log(JSON.stringify({level:"WARNING", code:"MASTER_SOURCE_WARNINGS_B34", sources:summary.length, detail:summary}));
+  if (typeof beEmitSystemEventV30_ === "function") {
+    beEmitSystemEventV30_("WARNING", "MASTER_SOURCE_WARNINGS_B34", {
+      message: summary.length + " nguồn có cảnh báo cấu hình/tên tab",
+      sources: summary
+    });
+  }
+}
+
 function beFindInfoSheetV31_(file, rawMasterConfig){
   return beFindMetadataSheetV32_(file, rawMasterConfig, "INFO");
 }
