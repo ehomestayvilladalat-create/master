@@ -755,7 +755,7 @@ function ceBuildFastCandidatePageResponseV626_(payload, startCursor, nextCandida
 
 function ceSearchLiveErrorReasonV2_(error){
   var message=String(error&&error.message?error.message:error||"").toUpperCase();
-  var known=["VILLA_COLUMN_NOT_FOUND","DATE_NOT_FOUND","DATE_COLUMN_NOT_FOUND","DEADLINE_EXCEEDED","SOURCE_READ_FAILED","PERMISSION_DENIED","SNAPSHOT_DATE_CELL_NOT_FOUND","SNAPSHOT_UNKNOWN_STATE","NO_CALENDAR_ACTIVITY"];
+  var known=["WHITE_NO_PRICE_B6","VILLA_COLUMN_NOT_FOUND","DATE_NOT_FOUND","DATE_COLUMN_NOT_FOUND","DEADLINE_EXCEEDED","SOURCE_READ_FAILED","PERMISSION_DENIED","SNAPSHOT_DATE_CELL_NOT_FOUND","SNAPSHOT_UNKNOWN_STATE","NO_CALENDAR_ACTIVITY"];
   for(var i=0;i<known.length;i++) if(message.indexOf(known[i])>=0) return known[i];
   return "LIVE_READ_FAILED";
 }

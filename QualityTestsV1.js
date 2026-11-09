@@ -78,3 +78,39 @@ function testNamelessPriceColumnsB3() {
   });
   return {success: true, code: "NAMELESS_PRICE_COLUMNS_PASS_B3"};
 }
+
+function testBlankCellUnknownB6() {
+  // Tab 10 ngày: cột C (index 2) ghi giá ở 8 ngày, ngày 9 trắng không giá, ngày 10 tô màu.
+  // Cột D (index 3) không bao giờ ghi giá (nguồn không ghi giá vào ô lịch).
+  var raw = [["Thứ", "Ngày", "Villa A", "Villa B"]], bgs = [["#ffffff", "#ffffff", "#ffffff", "#ffffff"]];
+  var dateIndex = {};
+  for (var d = 1; d <= 10; d++) {
+    var priceCell = d <= 8 ? "3500" : "";
+    raw.push(["T2", String(d), priceCell, ""]);
+    bgs.push(["#ffffff", "#ffffff", d === 10 ? "#ff0000" : "#ffffff", "#ffffff"]);
+    dateIndex["2026-11-" + (d < 10 ? "0" + d : d)] = d;
+  }
+  var c = {name: "Tháng 11", raw: raw, display: raw, backgrounds: bgs, notes: [], dateIndexV50: dateIndex};
+  var villa = {id: "VL-A", name: "Villa A", bedrooms: ""};
+  var s;
+  s = ceReadCalendarCellStateV34_(c, 1, 2, "AUTO", villa, "");
+  qualityAssertV1_(s.status === "FREE" && s.price === 3500000, "ô trắng có giá => TRỐNG có giá (3500 = 3.500.000đ)");
+  s = ceReadCalendarCellStateV34_(c, 9, 2, "AUTO", villa, "");
+  qualityAssertV1_(s.status === "UNKNOWN" && s.unknownReason === "WHITE_NO_PRICE_B6", "ô trắng KHÔNG giá ở cột thường ghi giá => CHƯA RÕ");
+  s = ceReadCalendarCellStateV34_(c, 10, 2, "AUTO", villa, "");
+  qualityAssertV1_(s.status === "BUSY", "ô có màu vẫn BẬN");
+  s = ceReadCalendarCellStateV34_(c, 9, 3, "AUTO", {id: "VL-B", name: "Villa B"}, "");
+  qualityAssertV1_(s.status === "FREE", "cột không bao giờ ghi giá: ô trắng vẫn TRỐNG như cũ");
+  s = ceReadCalendarCellStateV34_(c, 9, 2, "AUTO;O_TRANG_KHONG_GIA=TRONG", villa, "");
+  qualityAssertV1_(s.status === "FREE", "CONFIG LỊCH O_TRANG_KHONG_GIA=TRONG tắt B6 cho nguồn");
+  qualityAssertV1_(ceSearchLiveErrorReasonV2_(new Error("WHITE_NO_PRICE_B6: Ô trống nhưng không có giá")) === "WHITE_NO_PRICE_B6", "lý do loại phải là WHITE_NO_PRICE_B6");
+  qualityAssertV1_(ssClassifySnapshotErrorV341_("SNAPSHOT_WHITE_NO_PRICE_B6:2026-11-09") === "COVERAGE", "snapshot: thiếu giá là COVERAGE, không phải lỗi cứng");
+
+  // Snapshot cũ (trước B6) có F không giá trong dòng thường có giá => đọc là chưa rõ.
+  var row = ["SRC", "VL-A", "Villa A", "", "", 3, "", "m", "s", "f", "h", "F|3500||A2|", "F|3500||A3|", "F|3500||A4|", "F||||", "B"];
+  var ctx = {dateColumns: {"2026-11-01": 11, "2026-11-02": 12, "2026-11-03": 13, "2026-11-04": 14, "2026-11-05": 15}};
+  qualityAssertV1_(ssRowUsuallyHasPriceB6_(ctx, "VL-A|3", row, villa) === true, "dòng snapshot thường có giá");
+  var row2 = ["SRC", "VL-B", "Villa B", "", "", 4, "", "m", "s", "f", "h", "F||||", "F||||", "F||||", "F||||", "B"];
+  qualityAssertV1_(ssRowUsuallyHasPriceB6_(ctx, "VL-B|4", row2, {config: ""}) === false, "dòng snapshot không ghi giá => giữ TRỐNG");
+  return {success: true, code: "BLANK_CELL_UNKNOWN_PASS_B6"};
+}

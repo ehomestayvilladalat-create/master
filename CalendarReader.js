@@ -1144,6 +1144,14 @@ function ceReadColumnCalendarV34_(
       };
     }
 
+    if (state.status === "UNKNOWN" && state.unknownReason === "WHITE_NO_PRICE_B6") {
+      throw new Error(
+        "WHITE_NO_PRICE_B6: Ô trống nhưng không có giá tại " +
+        loc.context.name + "!" + ceColumnToLetterV33_(loc.column + 1) + (loc.row + 1) +
+        " - cần kiểm tra lịch/giá"
+      );
+    }
+
     if (state.status === "UNKNOWN") {
       throw new Error(
         "Không xác định trạng thái màu tại " +
@@ -2819,6 +2827,84 @@ function ceVillaNameScoreV40_(targetKey,targetTokens,item){
   return score;
 }
 
+/*
+ * B6 - Ô TRẮNG KHÔNG CÓ GIÁ = CHƯA RÕ (quyết định của chủ hệ thống 10/11/2026).
+ *
+ * Chỉ áp dụng cho cột "thường ghi giá": trong các hàng ngày của tab, ít nhất 3 ô
+ * và >= 20% số ô đọc được giá cho đúng căn/option này. Nguồn không ghi giá vào ô
+ * lịch giữ nguyên quy tắc cũ (nền trắng = trống, giá "Liên hệ"), tránh mất cả nguồn.
+ *
+ * Tắt cho một nguồn: CONFIG LỊCH thêm  O_TRANG_KHONG_GIA=TRONG  (hoặc WHITE_NO_PRICE=FREE).
+ * Tắt toàn hệ thống: Script Property  BE_B6_WHITE_NO_PRICE = FREE.
+ */
+var CE_B6_CACHE_ = {globalMode:null, configModes:{}};
+
+function ceB6GlobalModeV1_(){
+  if(CE_B6_CACHE_.globalMode!==null)return CE_B6_CACHE_.globalMode;
+  var mode='UNKNOWN';
+  try{
+    var v=String(PropertiesService.getScriptProperties().getProperty('BE_B6_WHITE_NO_PRICE')||'').trim().toUpperCase();
+    if(v==='FREE'||v==='TRONG'||v==='OFF')mode='FREE';
+  }catch(ignore){}
+  CE_B6_CACHE_.globalMode=mode;
+  return mode;
+}
+
+function ceB6ConfigModeV1_(rawConfig){
+  var key=String(rawConfig||'');
+  if(Object.prototype.hasOwnProperty.call(CE_B6_CACHE_.configModes,key))return CE_B6_CACHE_.configModes[key];
+  var mode='UNKNOWN';
+  try{
+    var cfg=parseBookingSourceConfig(key||'AUTO')||{};
+    var v=String(beConfigValue_(cfg,['O_TRANG_KHONG_GIA','WHITE_NO_PRICE'],'')||'').trim().toUpperCase();
+    v=typeof ceNormalize_==='function'?ceNormalize_(v).toUpperCase():v;
+    if(v==='FREE'||v==='TRONG'||v==='OFF')mode='FREE';
+  }catch(ignore){}
+  CE_B6_CACHE_.configModes[key]=mode;
+  return mode;
+}
+
+/** B6 - có coi ô trống-không-giá tại (c,col) là CHƯA RÕ không. */
+function ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel){
+  if(ceB6GlobalModeV1_()==='FREE')return false;
+  if(ceB6ConfigModeV1_(rawConfig)==='FREE')return false;
+  return ceColumnUsuallyHasPriceB6_(c,col,villa,optionLabel);
+}
+
+function ceWhiteNoPriceStateB6_(bg,display,note,baseReason){
+  return {
+    status:'UNKNOWN',available:null,price:null,unknownReason:'WHITE_NO_PRICE_B6',
+    reason:baseReason+' nhưng không có giá - cần kiểm tra',
+    background:bg,display:String(display||''),note:String(note||'')
+  };
+}
+
+/** B6 - cột của căn có thói quen ghi giá: >= 3 ô và >= 20% hàng ngày đọc được giá. */
+function ceColumnUsuallyHasPriceB6_(c,col,villa,optionLabel){
+  if(!c)return false;
+  c.priceColumnCacheB6=c.priceColumnCacheB6||{};
+  var key=[col,String(optionLabel||''),String(villa&&(villa.id||villa.name)||''),String(villa&&villa.bedrooms||'')].join('|');
+  if(Object.prototype.hasOwnProperty.call(c.priceColumnCacheB6,key))return c.priceColumnCacheB6[key];
+  var rows=[],seen={};
+  var idx=c.dateIndexV50||{};
+  Object.keys(idx).forEach(function(k){var r=Number(idx[k]);if(isFinite(r)&&r>=0&&!seen[r]){seen[r]=true;rows.push(r);}});
+  if(!rows.length){
+    var maxRows=Math.max((c.display||[]).length,(c.raw||[]).length);
+    for(var i=1;i<maxRows;i++)rows.push(i);
+  }
+  var priced=0;
+  rows.forEach(function(r){
+    var raw=c.raw&&c.raw[r]?c.raw[r][col]:'';
+    var disp=c.display&&c.display[r]?c.display[r][col]:'';
+    var p=ceParsePriceForVillaV59_(raw,villa,optionLabel);
+    if(p===null)p=ceParsePriceForVillaV59_(disp,villa,optionLabel);
+    if(p!==null)priced++;
+  });
+  var result=priced>=3&&priced>=Math.ceil(rows.length*0.2);
+  c.priceColumnCacheB6[key]=result;
+  return result;
+}
+
 function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
   var raw=c.raw[row][col];
   var display=c.display[row][col];
@@ -2838,6 +2924,10 @@ function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
    * - tất cả màu khác = bận.
    */
   if(ceIsWhiteV34_(bg)){
+    // B6: cột thường ghi giá mà ô trắng này không có giá => CHƯA RÕ, không mặc định TRỐNG.
+    if(price===null&&ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel)){
+      return ceWhiteNoPriceStateB6_(bg,display,note,'Nền trắng');
+    }
     return {status:'FREE',available:true,price:price,reason:'Nền trắng',background:bg,display:String(display||''),note:String(note||'')};
   }
 
@@ -2852,6 +2942,9 @@ function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
   if(configuredFreeColors.some(function(name){
     return ceColorMatchesFreeV41_(bg,name);
   })){
+    if(price===null&&ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel)){
+      return ceWhiteNoPriceStateB6_(bg,display,note,'Màu trống theo CONFIG');
+    }
     return {status:'FREE',available:true,price:price,reason:'Màu trống theo CONFIG',background:bg,display:String(display||''),note:String(note||'')};
   }
 

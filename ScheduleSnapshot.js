@@ -242,6 +242,7 @@ function ssClassifySnapshotErrorV341_(errorMessage) {
   var msg=String(errorMessage||"");
   if(msg==="SNAPSHOT_TAIL_SKIPPED_AFTER_DATE_GAP")return "COVERAGE";
   if(msg.indexOf("SNAPSHOT_DATE_CELL_NOT_FOUND:")===0)return "COVERAGE";
+  if(msg.indexOf("SNAPSHOT_WHITE_NO_PRICE_B6:")===0)return "COVERAGE";
   return "HARD";
 }
 
@@ -784,6 +785,10 @@ function ssReadSingleNightCellV320_(sourceContext, villa, date) {
   var loc = ceFindVillaNightCellV34_(sourceContext, villa, date, "", 0);
   if (!loc) throw new Error("SNAPSHOT_DATE_CELL_NOT_FOUND:" + ssDateKeyV320_(date));
   var state = ceReadCalendarCellStateV34_(loc.context, loc.row, loc.column, villa.config, villa, loc.optionLabel || "");
+  if (state && state.status === "UNKNOWN" && state.unknownReason === "WHITE_NO_PRICE_B6") {
+    // B6: ô trống không giá = CHƯA RÕ. Là thiếu dữ liệu của nguồn, không phải lỗi đọc.
+    throw new Error("SNAPSHOT_WHITE_NO_PRICE_B6:" + ssDateKeyV320_(date));
+  }
   if (!state || state.status === "UNKNOWN") {
     throw new Error("SNAPSHOT_UNKNOWN_STATE:" + ssDateKeyV320_(date));
   }
@@ -1569,6 +1574,11 @@ function ssTryReadVillaSnapshotV320_(ctx,villa,nights,guestCount) {
       ctx.misses++;
       return {usable:false,reason:"SNAPSHOT_" + state.status};
     }
+    if ((state.price === null || !Number.isFinite(state.price)) && ssRowUsuallyHasPriceB6_(ctx, key, row, villa)) {
+      // B6: snapshot cũ (trước bản B6) lưu ô trống-không-giá là FREE. Đọc lại như CHƯA RÕ.
+      ctx.misses++;
+      return {usable:false,reason:"SNAPSHOT_WHITE_NO_PRICE_B6",blockedDate:dateKey};
+    }
     if (state.price === null || !Number.isFinite(state.price)) complete = false;
     else total += state.price;
     nightly.push({
@@ -1584,6 +1594,24 @@ function ssTryReadVillaSnapshotV320_(ctx,villa,nights,guestCount) {
   }
   ctx.hits++;
   return {usable:true,reader:"SNAPSHOT_V320",sourceStatus:sourceStatus||"OK",readResult:{available:true,priceStatus:complete?"KNOWN":"CONTACT",totalPrice:complete?total:null,totalPriceText:complete?ceFormatMoney_(total):"Liên hệ báo giá",nightlyPrices:nightly,sourceLinks:nightly.map(function(x){return x.sourceLink;}),selectedOption:option.label || ""}};
+}
+
+/** B6 - dòng snapshot thường có giá: >= 3 ô FREE có giá và >= 20% số ô FREE. */
+function ssRowUsuallyHasPriceB6_(ctx, key, row, villa) {
+  if (typeof ceB6GlobalModeV1_ === "function" && ceB6GlobalModeV1_() === "FREE") return false;
+  if (typeof ceB6ConfigModeV1_ === "function" && ceB6ConfigModeV1_(villa && villa.config || "") === "FREE") return false;
+  ctx.rowPricedCacheB6 = ctx.rowPricedCacheB6 || {};
+  if (Object.prototype.hasOwnProperty.call(ctx.rowPricedCacheB6, key)) return ctx.rowPricedCacheB6[key];
+  var free = 0, priced = 0;
+  Object.keys(ctx.dateColumns || {}).forEach(function(dk) {
+    var st = ssDecodeNightCellV320_(row[ctx.dateColumns[dk]]);
+    if (st.status !== "FREE") return;
+    free++;
+    if (st.price !== null && Number.isFinite(st.price)) priced++;
+  });
+  var result = priced >= 3 && priced >= Math.ceil(free * 0.2);
+  ctx.rowPricedCacheB6[key] = result;
+  return result;
 }
 
 function getScheduleSnapshotSummaryV320() {

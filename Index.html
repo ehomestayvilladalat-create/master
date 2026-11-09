@@ -1651,6 +1651,7 @@
       if(r==="DEADLINE_EXCEEDED")return "⏱ Đọc lịch quá lâu – thử lại sau ít phút";
       if(r==="SOURCE_READ_FAILED")return "⚠️ File lịch của nguồn đọc không được – báo admin";
       if(r==="NO_CALENDAR_ACTIVITY")return "📅 Lịch chưa có dữ liệu ngày này – hỏi chủ nhà";
+      if(r==="WHITE_NO_PRICE_B6"||r==="SNAPSHOT_WHITE_NO_PRICE_B6")return "💬 Ô lịch để trắng nhưng chưa có giá – hỏi chủ nhà trước khi chốt";
       if(r==="LIVE_READ_FAILED"||r==="SNAPSHOT_UNKNOWN_STATE")return "⚠️ Chưa đọc được lịch (tab tháng hoặc file có thể lỗi) – thử lại, vẫn lỗi thì báo admin";
       if(r)return "⚠️ Đọc lịch chưa được ("+r+")";
       return "⏳ Cần kiểm tra lịch / giá";
