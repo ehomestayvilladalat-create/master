@@ -3531,6 +3531,8 @@ function buildMasterVilla(options){
   // Incremental luôn dùng fast image mode. Full sync qua Admin cũng bật fastImages.
   BE_MASTER_FAST_IMAGE_MODE_V328_ = incrementalModeV328 || options.fastImages === true;
   beClearMasterSheetRuntimeCacheV21_();
+  // B1 GhostGuard V1: reset trạng thái/ngân sách gỡ căn ảo cho lần build này.
+  if (typeof beGhostBeginRunV1_ === "function") beGhostBeginRunV1_();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var master = ss.getSheetByName(BE_CONFIG.MASTER_SHEET);
 
@@ -4255,6 +4257,19 @@ function buildMasterVilla(options){
         // nếu registry chưa gán thì mới dùng map rename R2 hiện hữu của production.
         if (!identityAssignmentV1) {
           var preservedRenameSkuV4194 = confirmedRenameSkuMapV4194[Number(villa.sourceColumn || 0)] || "";
+          // B2 fix: không dùng SKU cũ nếu registry đã gán SKU đó cho một căn khác của source
+          // (tránh 2 căn cùng MÃ CĂN).
+          if (
+            preservedRenameSkuV4194 &&
+            villaIdentityAssignmentsV1 &&
+            villaIdentityAssignmentsV1.some(function(a) { return a && a.sku === preservedRenameSkuV4194; })
+          ) {
+            Logger.log(JSON.stringify({
+              level:"WARNING",code:"SOURCE_RENAME_SKU_SKIPPED_ALREADY_ASSIGNED_B2",
+              sourceId:sourceId,source:source,villa:villa.name || "",sku:preservedRenameSkuV4194
+            }));
+            preservedRenameSkuV4194 = "";
+          }
           if (preservedRenameSkuV4194) {
             villaSku = preservedRenameSkuV4194;
             Logger.log(JSON.stringify({
@@ -4263,6 +4278,25 @@ function buildMasterVilla(options){
               sourceColumn:Number(villa.sourceColumn || 0),sku:villaSku,
               rule:"R2_CONFIRMED_SINGLE_RENAME_SAME_UNIQUE_COLUMN"
             }));
+            /*
+             * B2 fix: registry phải ghi nhận đây là ĐỔI TÊN của chính SKU cũ.
+             * Bản cũ để registry retire SKU này (REMOVED) trong khi MASTER_VILLA vẫn
+             * dùng nó; lần build sau căn không còn khớp registry nên bị cấp MÃ MỚI
+             * (ảnh lệch). Giờ: gán record cũ cho căn mới tên, bỏ SKU khỏi danh sách retire.
+             */
+            if (villaIdentityContextV1 && typeof beIdentityRecordsForSourceV1_ === "function") {
+              var renameRecordB2 = null;
+              beIdentityRecordsForSourceV1_(villaIdentityContextV1, sourceId, source).forEach(function(rec) {
+                if (rec && rec.sku === preservedRenameSkuV4194) renameRecordB2 = rec;
+              });
+              if (renameRecordB2) {
+                identityAssignmentV1 = {sku:preservedRenameSkuV4194, record:renameRecordB2, mode:"CONFIRMED_RENAME_V4194"};
+              }
+              var metaB2 = villaIdentityAssignmentsV1 && villaIdentityAssignmentsV1._identityMeta;
+              if (metaB2 && metaB2.removedSkus) {
+                metaB2.removedSkus = metaB2.removedSkus.filter(function(s) { return s !== preservedRenameSkuV4194; });
+              }
+            }
           }
         }
 
@@ -4687,6 +4721,18 @@ function buildMasterVilla(options){
         level:"ERROR",code:"VILLA_IDENTITY_FLUSH_FAILED_V1",
         error:String(identityFlushErrorV1 && identityFlushErrorV1.message ? identityFlushErrorV1.message : identityFlushErrorV1),
         action:"MASTER_ALREADY_BUILT_IDS_REMAIN_VALID"
+      }));
+    }
+  }
+
+  // B1 GhostGuard V1: chỉ lưu số lần đọc / GHOST_PREVIEW / cảnh báo sau khi publish thành công.
+  if (typeof beGhostFlushV1_ === "function") {
+    try {
+      beGhostFlushV1_();
+    } catch (ghostFlushErrorV1) {
+      Logger.log(JSON.stringify({
+        level:"WARNING",code:"GHOST_GUARD_FLUSH_FAILED_V1",
+        error:String(ghostFlushErrorV1 && ghostFlushErrorV1.message ? ghostFlushErrorV1.message : ghostFlushErrorV1)
       }));
     }
   }
