@@ -53,7 +53,9 @@ function hcRelevantTabsV2_(file) {
       var name = sh.getName();
       var month = typeof ceSheetMonthV50_ === "function" ? Number(ceSheetMonthV50_(name) || 0) : 0;
       if (!(month >= 1 && month <= 12)) continue;
-      var year = typeof ceSheetYearV50_ === "function" ? Number(ceSheetYearV50_(name, nowYear) || nowYear) : nowYear;
+      var year = typeof ceSheetYearForDateB5_ === "function"
+        ? Number(ceSheetYearForDateB5_(name, month, new Date()) || nowYear)
+        : (typeof ceSheetYearV50_ === "function" ? Number(ceSheetYearV50_(name, nowYear) || nowYear) : nowYear);
       if (year * 12 + (month - 1) < nowIndex) continue;
       tabs.push({ sheet: sh, name: name });
     }

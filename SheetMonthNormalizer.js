@@ -75,6 +75,8 @@ function ceNormalizeMonthSheetTextV1_(text) {
     s = s.replace(re, "$1thang " + e[1]);
   });
 
+  // B5: "th 11", "th.11", "th01" (viết tắt "Tháng" của nhiều nguồn) => "thang 11"
+  s = s.replace(/(^|[^a-z])th[\s._\-:,]*0?(1[0-2]|[1-9])(?!\d)/g, "$1thang $2");
   // "thang.10", "thang_10", "thang-10", "thang10", "thg 10", "month 10" => "thang 10"
   s = s.replace(/(^|[^a-z])(thang|thg|month)[\s._\-:,]*0?(1[0-2]|[1-9])(?!\d)/g, "$1thang $3");
   // "t.10", "t-10", "t_10" (chu T don le + dau ngan) => "thang 10"

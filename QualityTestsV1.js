@@ -8,6 +8,7 @@ function testQualityFixesV1() {
     testNamelessPriceColumnsB3()
   ];
   if (typeof testBlankCellUnknownB6 === "function") results.push(testBlankCellUnknownB6());
+  results.push(testNewYearCalendarB5());
   var out = {success: true, code: "QUALITY_FIXES_PASS_V1", suites: results.map(function(r) { return r.code; })};
   Logger.log(JSON.stringify(out));
   return out;
@@ -113,4 +114,44 @@ function testBlankCellUnknownB6() {
   var row2 = ["SRC", "VL-B", "Villa B", "", "", 4, "", "m", "s", "f", "h", "F||||", "F||||", "F||||", "F||||", "B"];
   qualityAssertV1_(ssRowUsuallyHasPriceB6_(ctx, "VL-B|4", row2, {config: ""}) === false, "dòng snapshot không ghi giá => giữ TRỐNG");
   return {success: true, code: "BLANK_CELL_UNKNOWN_PASS_B6"};
+}
+
+/** B5 - tìm căn qua năm mới với tab không ghi năm ("Tháng 12" kéo dài sang 1-5/1). */
+function testNewYearCalendarB5() {
+  function mkSheet(name, data, id) {
+    return {
+      getName: function() { return name; }, isSheetHidden: function() { return false; },
+      getSheetId: function() { return id; }, getIndex: function() { return id; },
+      getLastRow: function() { return data.length; }, getLastColumn: function() { return data[0].length; },
+      getMaxRows: function() { return data.length; }, getMaxColumns: function() { return data[0].length; },
+      getRange: function(r, c, nr, nc) {
+        var slice = function(f) {
+          var out = [];
+          for (var i = 0; i < nr; i++) { var row = []; for (var j = 0; j < nc; j++) row.push(f((data[r - 1 + i] || [])[c - 1 + j])); out.push(row); }
+          return out;
+        };
+        return {
+          getValues: function() { return slice(function(v) { return v === undefined ? "" : v; }); },
+          getDisplayValues: function() { return slice(function(v) { return v === undefined ? "" : String(v); }); },
+          getBackgrounds: function() { return slice(function() { return "#ffffff"; }); },
+          getNotes: function() { return slice(function() { return ""; }); },
+          getMergedRanges: function() { return []; }
+        };
+      }
+    };
+  }
+  var wd = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+  var dec = [["Thứ", "Ngày", "Villa A"]];
+  for (var d = 1; d <= 31; d++) dec.push([wd[new Date(2026, 11, d).getDay()], String(d), "3500"]);
+  for (var j = 1; j <= 5; j++) dec.push([wd[new Date(2027, 0, j).getDay()], j + "/1", "4000"]);
+  var file = {getSheets: function() { return [mkSheet("Tháng 12", dec, 1)]; }, getId: function() { return "TESTFILE"; },
+    getUrl: function() { return "https://docs.google.com/spreadsheets/d/TESTFILE/edit"; }, getName: function() { return "test"; }};
+  var villa = {id: "VL-TEST", name: "Villa A", sourceColumn: 3, config: "AUTO", source: "test", bedrooms: ""};
+  var ctx = ceCreateSourceContextV30_(file, {source: "test", candidates: 1, maxColumn: 3, requiresFullScan: false});
+  var r = ceReadColumnCalendarV34_(ctx, villa, [new Date(2027, 0, 2), new Date(2027, 0, 3)], 2, false);
+  qualityAssertV1_(r.available === true && r.totalPrice === 8000000, "phải đọc được 2-3/1/2027 từ tab Tháng 12 (giá 4.000.000đ/đêm)");
+  qualityAssertV1_(ceMonthFromSheetNameV1_("Th 11") === 11, "tên tab viết tắt \"Th 11\" phải là tháng 11");
+  qualityAssertV1_(ceCalendarSheetBucketForDateV54_("Tháng 12", new Date(2027, 0, 2)) === "PREVIOUS", "Tháng 12 là tab TRƯỚC của ngày 2/1/2027");
+  qualityAssertV1_(ceCalendarSheetBucketForDateV54_("Tháng 1", new Date(2026, 11, 30)) === "NEXT", "Tháng 1 là tab SAU của ngày 30/12/2026");
+  return {success: true, code: "NEW_YEAR_CALENDAR_PASS_B5"};
 }

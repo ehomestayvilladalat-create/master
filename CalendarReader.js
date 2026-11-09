@@ -427,6 +427,11 @@ function ceSheetMonthV50_(sheetName) {
 }
 
 function ceSheetYearV50_(sheetName, fallbackYear) {
+  return ceSheetExplicitYearB5_(sheetName) || Number(fallbackYear || new Date().getFullYear());
+}
+
+/** B5 - năm ghi rõ trên tên tab; 0 nếu tên không có năm hợp lệ. */
+function ceSheetExplicitYearB5_(sheetName) {
   try {
     if (typeof ceExtractYearFromSheetName_ === "function") {
       var existing = Number(ceExtractYearFromSheetName_(sheetName) || 0);
@@ -443,8 +448,26 @@ function ceSheetYearV50_(sheetName, fallbackYear) {
     var yy = Number(m[1]);
     if (yy >= 20 && yy <= 99) return 2000 + yy;
   }
+  return 0;
+}
 
-  return Number(fallbackYear || new Date().getFullYear());
+/**
+ * B5 - QUY TẮC NĂM DUY NHẤT cho tên tab (dùng chung build MASTER, tìm căn, snapshot):
+ * - tên có năm hợp lệ: dùng năm đó;
+ * - tên không có năm: năm làm tháng của tab gần ngày tham chiếu nhất trong ±1 tháng
+ *   (tìm 2/1/2027 thì "Tháng 12" = 12/2026; tìm 30/12/2026 thì "Tháng 1" = 1/2027);
+ * - còn lại: năm của ngày tham chiếu (như cũ).
+ */
+function ceSheetYearForDateB5_(sheetName, sheetMonth, referenceDate) {
+  if (!(referenceDate instanceof Date) || isNaN(referenceDate.getTime())) referenceDate = new Date();
+  var explicit = ceSheetExplicitYearB5_(sheetName);
+  if (explicit) return explicit;
+  sheetMonth = Number(sheetMonth || 0);
+  if (sheetMonth >= 1 && sheetMonth <= 12 && typeof beNearestYearForMonthB4_ === "function") {
+    var near = beNearestYearForMonthB4_(sheetMonth, referenceDate, 1);
+    if (near) return near;
+  }
+  return referenceDate.getFullYear();
 }
 
 function ceInlineMonthMarkerV4223_(rawValue, displayValue, fallbackYear, previousMarker) {
@@ -894,7 +917,7 @@ function ceDetectDateColumnV1_(
     : maxColumns;
 
   var sheetMonth = ceSheetMonthV50_(sheetName);
-  var sheetYear = ceSheetYearV50_(sheetName, fallbackDate.getFullYear());
+  var sheetYear = ceSheetYearForDateB5_(sheetName, sheetMonth, fallbackDate);
   var scanRows = ceDateRowsForScanV50_(rowCount, readConfig);
 
   var bestColumn = -1;
@@ -1468,7 +1491,7 @@ function ceCalendarSheetBucketForDateV54_(sheetName, targetDate) {
   }
 
   var month = ceSheetMonthV50_(sheetName);
-  var year = ceSheetYearV50_(sheetName, targetYear);
+  var year = ceSheetYearForDateB5_(sheetName, month, targetDate);
 
   if (!month) return "UNKNOWN";
   if (month === targetMonth && (!year || year === targetYear)) return "TARGET";
@@ -1527,7 +1550,7 @@ function ceCalendarCandidateSheetsV34_(file, targetDate, rawConfig) {
 
   function bucket_(sheet) {
     var month = ceSheetMonthV50_(sheet.getName());
-    var year = ceSheetYearV50_(sheet.getName(), targetYear);
+    var year = ceSheetYearForDateB5_(sheet.getName(), month, targetDate);
 
     if (!month) {
       return {sheet: sheet, bucket: "UNKNOWN", month: 0, year: year};
@@ -1630,6 +1653,7 @@ function ceLoadCalendarSheetV34_(
   ) {
     if (fallbackDate instanceof Date && !isNaN(fallbackDate.getTime())) {
       c.dateReferenceYearV4223 = fallbackDate.getFullYear();
+      c.dateReferenceDateB5 = c.dateReferenceDateB5 || new Date(fallbackDate.getTime());
     }
     if (sourceContext.fastTimingV30) {
       sourceContext.fastTimingV30.contextHits = Number(sourceContext.fastTimingV30.contextHits || 0) + 1;
@@ -1786,6 +1810,7 @@ function ceLoadCalendarSheetV34_(
 
   if (fallbackDate instanceof Date && !isNaN(fallbackDate.getTime())) {
     c.dateReferenceYearV4223 = fallbackDate.getFullYear();
+    c.dateReferenceDateB5 = c.dateReferenceDateB5 || new Date(fallbackDate.getTime());
   }
 
   if (c.dateConfigKeyV50 !== configKey) {
@@ -2055,10 +2080,10 @@ function ceBuildCalendarDateIndexV50_(c) {
   };
 
   var sheetMonth = ceSheetMonthV50_(c.name);
-  var sheetYear = ceSheetYearV50_(
-    c.name,
-    Number(c.dateReferenceYearV4223 || new Date().getFullYear())
-  );
+  // B5: năm theo quy tắc chung, tham chiếu NGÀY đầu tiên dùng tab này (không chỉ năm).
+  var sheetYear = c.dateReferenceDateB5 instanceof Date
+    ? ceSheetYearForDateB5_(c.name, sheetMonth, c.dateReferenceDateB5)
+    : ceSheetYearV50_(c.name, Number(c.dateReferenceYearV4223 || new Date().getFullYear()));
 
   var rowIndexes = ceDateRowsForScanV50_(
     c.display.length,
