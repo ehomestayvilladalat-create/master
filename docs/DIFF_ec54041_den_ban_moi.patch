@@ -1,8 +1,8 @@
 diff --git a/.claspignore b/.claspignore
-index a014a44..c56cff1 100644
+index a014a44..8d59d40 100644
 --- a/.claspignore
 +++ b/.claspignore
-@@ -1,7 +1,9 @@
+@@ -1,7 +1,11 @@
 -_backup_*/
 +# Không đẩy lên Apps Script: thư mục backup, tài liệu, file ẩn.
 +**/.*
@@ -17,6 +17,8 @@ index a014a44..c56cff1 100644
 -.claspignore
 +docs/**
 +**/*.md
++tools/**
++**/package.json
 diff --git a/Admin.js b/Admin.js
 index dbb276d..1a8eb18 100644
 --- a/Admin.js
@@ -2138,10 +2140,10 @@ index 2564ba4..1091ca8 100644
    var cases=[
 diff --git a/OpsChecksV1.js b/OpsChecksV1.js
 new file mode 100644
-index 0000000..8ea6a06
+index 0000000..a66ef88
 --- /dev/null
 +++ b/OpsChecksV1.js
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,236 @@
 +/**
 + * OpsChecksV1.js - công cụ KIỂM TRA CHỈ ĐỌC (không ghi gì), chạy tay trong Apps Script.
 + */
@@ -2349,6 +2351,32 @@ index 0000000..8ea6a06
 +    }
 +  }
 +  out.next = out.stoppedAt != null ? out.stoppedAt : (startIndex + count < sources.length ? startIndex + count : null);
++  Logger.log(JSON.stringify(out, null, 2));
++  return out;
++}
++
++/**
++ * Review 10/11 mục 5 - TRƯỚC KHI xóa/đổi tên file: liệt kê trigger đang cài và
++ * kiểm tra hàm xử lý của từng trigger còn tồn tại không. Chỉ đọc.
++ *   checkTriggerHandlersV1()                       // trigger hiện tại
++ *   checkTriggerHandlersV1(["startSearchBenchmarkV1","runNextSearchBenchmarkV1"])  // + hàm sắp gỡ
++ */
++function checkTriggerHandlersV1(functionsToRemove) {
++  var removing = {};
++  (functionsToRemove || []).forEach(function(n) { removing[String(n)] = true; });
++  var g = (typeof globalThis !== "undefined") ? globalThis : this;
++  var rows = ScriptApp.getProjectTriggers().map(function(t) {
++    var handler = t.getHandlerFunction();
++    return {handler: handler, event: String(t.getEventType()), source: String(t.getTriggerSource()),
++      exists: typeof g[handler] === "function", willBeRemoved: !!removing[handler]};
++  });
++  var out = {success: true, code: "TRIGGER_HANDLER_CHECK_V1", triggers: rows.length,
++    missingHandlers: rows.filter(function(r) { return !r.exists; }),
++    blockedByRemoval: rows.filter(function(r) { return r.willBeRemoved; }),
++    all: rows};
++  out.verdict = out.missingHandlers.length || out.blockedByRemoval.length
++    ? "CẦN XỬ LÝ: có trigger trỏ tới hàm không tồn tại hoặc hàm sắp bị gỡ"
++    : "OK: mọi trigger đều có hàm xử lý và không dính hàm sắp gỡ";
 +  Logger.log(JSON.stringify(out, null, 2));
 +  return out;
 +}
