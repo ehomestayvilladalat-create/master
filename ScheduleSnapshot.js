@@ -1564,10 +1564,9 @@ function ssTryReadVillaSnapshotV320_(ctx,villa,nights,guestCount) {
   return {usable:true,reader:"SNAPSHOT_V320",sourceStatus:sourceStatus||"OK",readResult:{available:true,priceStatus:complete?"KNOWN":"CONTACT",totalPrice:complete?total:null,totalPriceText:complete?ceFormatMoney_(total):"Liên hệ báo giá",nightlyPrices:nightly,sourceLinks:nightly.map(function(x){return x.sourceLink;}),selectedOption:option.label || ""}};
 }
 
-/** B6 - dòng snapshot thường có giá: >= 3 ô FREE có giá và >= 20% số ô FREE. */
+/** B6 (mặc định tắt) - dòng snapshot thường có giá: >= 3 ô FREE có giá và >= 20% số ô FREE. */
 function ssRowUsuallyHasPriceB6_(ctx, key, row, villa) {
-  if (typeof ceB6GlobalModeV1_ === "function" && ceB6GlobalModeV1_() === "FREE") return false;
-  if (typeof ceB6ConfigModeV1_ === "function" && ceB6ConfigModeV1_(villa && villa.config || "") === "FREE") return false;
+  if (typeof ceB6EnabledForConfigV1_ !== "function" || !ceB6EnabledForConfigV1_(villa && villa.config || "")) return false;
   ctx.rowPricedCacheB6 = ctx.rowPricedCacheB6 || {};
   if (Object.prototype.hasOwnProperty.call(ctx.rowPricedCacheB6, key)) return ctx.rowPricedCacheB6[key];
   var free = 0, priced = 0;

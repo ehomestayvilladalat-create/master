@@ -3872,6 +3872,10 @@ function buildMasterVilla(options){
       var calendarSheet = calendarSelectionV4210.sheet;
       var inactiveCalendarWindowV4210 = calendarSelectionV4210.inactiveWindow === true;
       beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, calendarSelectionV4210.warnings);
+      // Review 10/11 mục 2: tên màu trống không hiểu được => cảnh báo ở cột trạng thái.
+      if (typeof ceFreeColorConfigIssuesV1_ === "function") {
+        beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, ceFreeColorConfigIssuesV1_(calendarConfig));
+      }
       b7TimerV1.mark("2_chon_tab_lich");
       var imageSheet = calendarSheet;
       var infoSheet = calendarSheet;

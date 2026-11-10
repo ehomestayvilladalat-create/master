@@ -2,7 +2,7 @@
 
 function opsConfigAllowedKeysV312_(block){
   var common=["SHEET","LAYOUT","START_COL","END_COL","START_ROW","END_ROW","NAME_ROW","NAME_COL","NAME_SCAN_ROWS","SCAN_ROWS","SCAN_COLS","FALLBACK","FIXED_ROW","AUTO_ROW","TOP_ROWS","MIN_NAMES","MIN_NAMES_IN_ROW","START_COLUMN","END_COLUMN","COLUMN_START","COLUMN_END","ALLOW_FALLBACK","AUTO_FALLBACK","EXCLUDE_COLS","SKIP_COLS","FIXED_ROW_STRICT_COLUMN_FILTER","INFO_END_COL","DATA_END_COL","INFO_END_ROW","DATA_END_ROW"];
-  if(block==="CALENDAR")return common.concat(["DATE_COL","DATE_COLUMN","DATE_ROW","DATE_ROWS","DATE_START_ROW","DATE_END_ROW","DATE_ORDER","CALENDAR_SHEET","GROUP_OPTIONS_B64","FREE_COLORS","MAU_TRONG","AVAILABLE_COLORS","FREE_COLOR_GROUPS","NHOM_MAU_TRONG","AVAILABLE_COLOR_GROUPS"]);
+  if(block==="CALENDAR")return common.concat(["DATE_COL","DATE_COLUMN","DATE_ROW","DATE_ROWS","DATE_START_ROW","DATE_END_ROW","DATE_ORDER","CALENDAR_SHEET","GROUP_OPTIONS_B64","FREE_COLORS","MAU_TRONG","AVAILABLE_COLORS","FREE_COLOR_GROUPS","NHOM_MAU_TRONG","AVAILABLE_COLOR_GROUPS","O_TRANG_KHONG_GIA","WHITE_NO_PRICE"]);
   if(block==="IMAGE")return common.concat(["IMAGE_ROW","IMAGE_COL","IMAGE_SCAN_ROWS","IMAGE_ROWS","REQUIRE_IMAGE","IMAGE_ASSIGN_MODE","INFO_LAYOUT","METADATA_LAYOUT","INFO_START_ROW","INFO_START_COL","INFO_NAME_ROW","INFO_NAME_COL"]);
   if(block==="INFO")return common.concat(["INFO_ROW","INFO_ROWS","INFO_COL","INFO_FROM_NAME_CELL","INFO_LAYOUT","METADATA_LAYOUT","INFO_SHEET","METADATA_SHEET","SHEET_INFO","INFO_HEADER_ROW","INFO_START_ROW","INFO_START_COL","INFO_NAME_ROW","INFO_NAME_COL","MAPS_ROW","MAPS_COL","MAP_ROW","MAP_COL","STANDARD_ROW","STANDARD_COL","BEDROOMS_ROW","BEDROOMS_COL","DESCRIPTION_ROW","DESCRIPTION_COL","DATA_START_ROW","DATA_START_COL"]);
 
@@ -351,6 +351,13 @@ function opsValidateConfigBlockV4_(raw,block,context){
     "Kiểm tra chính tả/key trước khi giữ config này.",{keys:unknown});
 
   issues=issues.concat(opsValidateConfigSyntaxV4_(raw,block));
+  // Review 10/11 mục 2: tên/mã màu trống không hiểu được => trước đây bỏ qua im lặng.
+  if(block==="CALENDAR"&&typeof ceFreeColorConfigIssuesV1_==="function"){
+    ceFreeColorConfigIssuesV1_(raw).forEach(function(x){
+      opsV4Push_(issues,"WARNING",block,x.code,x.message,
+        "Sửa tên màu trong CONFIG LỊCH; nếu không, ô màu đó vẫn bị coi là BẬN.",{key:x.key,value:x.value});
+    });
+  }
   return {raw:opsV4Text_(raw),parsed:opsV4Cfg_(raw),issues:issues};
 }
 

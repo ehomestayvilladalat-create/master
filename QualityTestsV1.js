@@ -12,6 +12,7 @@ function testQualityFixesV1() {
   results.push(testBatchedRowDeleteB7());
   results.push(testNoAccessCacheB10());
   results.push(testAiBreakerRulesV1());
+  results.push(testColoredCellBusyV1());
   var out = {success: true, code: "QUALITY_FIXES_PASS_V1", suites: results.map(function(r) { return r.code; })};
   Logger.log(JSON.stringify(out));
   return out;
@@ -85,38 +86,49 @@ function testNamelessPriceColumnsB3() {
 
 function testBlankCellUnknownB6() {
   // Tab 10 ngày: cột C (index 2) ghi giá ở 8 ngày, ngày 9 trắng không giá, ngày 10 tô màu.
-  // Cột D (index 3) không bao giờ ghi giá (nguồn không ghi giá vào ô lịch).
+  // Cột D (index 3) không bao giờ ghi giá.
   var raw = [["Thứ", "Ngày", "Villa A", "Villa B"]], bgs = [["#ffffff", "#ffffff", "#ffffff", "#ffffff"]];
   var dateIndex = {};
   for (var d = 1; d <= 10; d++) {
-    var priceCell = d <= 8 ? "3500" : "";
-    raw.push(["T2", String(d), priceCell, ""]);
+    raw.push(["T2", String(d), d <= 8 ? "3500" : "", ""]);
     bgs.push(["#ffffff", "#ffffff", d === 10 ? "#ff0000" : "#ffffff", "#ffffff"]);
     dateIndex["2026-11-" + (d < 10 ? "0" + d : d)] = d;
   }
-  var c = {name: "Tháng 11", raw: raw, display: raw, backgrounds: bgs, notes: [], dateIndexV50: dateIndex};
+  function ctx() { return {name: "Tháng 11", raw: raw, display: raw, backgrounds: bgs, notes: [], dateIndexV50: dateIndex}; }
   var villa = {id: "VL-A", name: "Villa A", bedrooms: ""};
-  var s;
-  s = ceReadCalendarCellStateV34_(c, 1, 2, "AUTO", villa, "");
-  qualityAssertV1_(s.status === "FREE" && s.price === 3500000, "ô trắng có giá => TRỐNG có giá (3500 = 3.500.000đ)");
-  s = ceReadCalendarCellStateV34_(c, 9, 2, "AUTO", villa, "");
-  qualityAssertV1_(s.status === "UNKNOWN" && s.unknownReason === "WHITE_NO_PRICE_B6", "ô trắng KHÔNG giá ở cột thường ghi giá => CHƯA RÕ");
-  s = ceReadCalendarCellStateV34_(c, 10, 2, "AUTO", villa, "");
-  qualityAssertV1_(s.status === "BUSY", "ô có màu vẫn BẬN");
-  s = ceReadCalendarCellStateV34_(c, 9, 3, "AUTO", {id: "VL-B", name: "Villa B"}, "");
-  qualityAssertV1_(s.status === "FREE", "cột không bao giờ ghi giá: ô trắng vẫn TRỐNG như cũ");
-  s = ceReadCalendarCellStateV34_(c, 9, 2, "AUTO;O_TRANG_KHONG_GIA=TRONG", villa, "");
-  qualityAssertV1_(s.status === "FREE", "CONFIG LỊCH O_TRANG_KHONG_GIA=TRONG tắt B6 cho nguồn");
-  qualityAssertV1_(ceSearchLiveErrorReasonV2_(new Error("WHITE_NO_PRICE_B6: Ô trống nhưng không có giá")) === "WHITE_NO_PRICE_B6", "lý do loại phải là WHITE_NO_PRICE_B6");
-  qualityAssertV1_(ssClassifySnapshotErrorV341_("SNAPSHOT_WHITE_NO_PRICE_B6:2026-11-09") === "COVERAGE", "snapshot: thiếu giá là COVERAGE, không phải lỗi cứng");
+  var saved = CE_B6_CACHE_.globalMode;
+  try {
+    CE_B6_CACHE_.globalMode = "OFF"; // mặc định
+    var s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO", villa, "");
+    qualityAssertV1_(s.status === "FREE" && s.price === null, "MẶC ĐỊNH: ô trắng không giá = TRỐNG (giá Liên hệ)");
+    s = ceReadCalendarCellStateV34_(ctx(), 1, 2, "AUTO", villa, "");
+    qualityAssertV1_(s.status === "FREE" && s.price === 3500000, "ô trắng có giá => TRỐNG có giá (3500 = 3.500.000đ)");
+    s = ceReadCalendarCellStateV34_(ctx(), 10, 2, "AUTO", villa, "");
+    qualityAssertV1_(s.status === "BUSY", "ô có màu vẫn BẬN");
+    s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO;O_TRANG_KHONG_GIA=CHUA_RO", villa, "");
+    qualityAssertV1_(s.status === "UNKNOWN" && s.unknownReason === "WHITE_NO_PRICE_B6", "bật theo nguồn: ô trắng không giá ở cột thường ghi giá => CHƯA RÕ");
+    s = ceReadCalendarCellStateV34_(ctx(), 9, 3, "AUTO;O_TRANG_KHONG_GIA=CHUA_RO", {id: "VL-B", name: "Villa B"}, "");
+    qualityAssertV1_(s.status === "FREE", "bật theo nguồn nhưng cột không ghi giá: vẫn TRỐNG");
+    CE_B6_CACHE_.globalMode = "ON"; // bật toàn hệ thống
+    s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO", villa, "");
+    qualityAssertV1_(s.status === "UNKNOWN", "bật toàn hệ thống => CHƯA RÕ");
+    s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO;O_TRANG_KHONG_GIA=TRONG", villa, "");
+    qualityAssertV1_(s.status === "FREE", "nguồn khai TRONG thắng cấu hình toàn hệ thống");
+    qualityAssertV1_(ceB6ParseModeV1_("Chưa rõ") === "ON" && ceB6ParseModeV1_("TRỐNG") === "OFF" && ceB6ParseModeV1_("") === "", "đọc giá trị có dấu");
 
-  // Snapshot cũ (trước B6) có F không giá trong dòng thường có giá => đọc là chưa rõ.
-  var row = ["SRC", "VL-A", "Villa A", "", "", 3, "", "m", "s", "f", "h", "F|3500||A2|", "F|3500||A3|", "F|3500||A4|", "F||||", "B"];
-  var ctx = {dateColumns: {"2026-11-01": 11, "2026-11-02": 12, "2026-11-03": 13, "2026-11-04": 14, "2026-11-05": 15}};
-  qualityAssertV1_(ssRowUsuallyHasPriceB6_(ctx, "VL-A|3", row, villa) === true, "dòng snapshot thường có giá");
-  var row2 = ["SRC", "VL-B", "Villa B", "", "", 4, "", "m", "s", "f", "h", "F||||", "F||||", "F||||", "F||||", "B"];
-  qualityAssertV1_(ssRowUsuallyHasPriceB6_(ctx, "VL-B|4", row2, {config: ""}) === false, "dòng snapshot không ghi giá => giữ TRỐNG");
-  return {success: true, code: "BLANK_CELL_UNKNOWN_PASS_B6"};
+    // Snapshot: chỉ đọc lại thành chưa rõ khi B6 bật.
+    var row = ["SRC", "VL-A", "Villa A", "", "", 3, "", "m", "s", "f", "h", "F|3500||A2|", "F|3500||A3|", "F|3500||A4|", "F||||", "B"];
+    var sctx = {dateColumns: {"2026-11-01": 11, "2026-11-02": 12, "2026-11-03": 13, "2026-11-04": 14, "2026-11-05": 15}};
+    CE_B6_CACHE_.globalMode = "OFF";
+    qualityAssertV1_(ssRowUsuallyHasPriceB6_(sctx, "VL-A|3", row, {config: "AUTO"}) === false, "snapshot: B6 tắt => không đổi kết quả");
+    sctx = {dateColumns: sctx.dateColumns};
+    qualityAssertV1_(ssRowUsuallyHasPriceB6_(sctx, "VL-A|3", row, {config: "AUTO;O_TRANG_KHONG_GIA=CHUA_RO"}) === true, "snapshot: B6 bật theo nguồn => dòng thường có giá");
+  } finally {
+    CE_B6_CACHE_.globalMode = saved;
+  }
+  qualityAssertV1_(ceSearchLiveErrorReasonV2_(new Error("WHITE_NO_PRICE_B6: x")) === "WHITE_NO_PRICE_B6", "lý do loại WHITE_NO_PRICE_B6");
+  qualityAssertV1_(ssClassifySnapshotErrorV341_("SNAPSHOT_WHITE_NO_PRICE_B6:2026-11-09") === "COVERAGE", "snapshot thiếu giá là COVERAGE");
+  return {success: true, code: "BLANK_CELL_DEFAULT_FREE_PASS_B6"};
 }
 
 /** B5 - tìm căn qua năm mới với tab không ghi năm ("Tháng 12" kéo dài sang 1-5/1). */
@@ -186,4 +198,47 @@ function testNoAccessCacheB10() {
   delete ceNoAccessFilesB10_()[fileId];
   try { CacheService.getScriptCache().put(CE_NO_ACCESS_CACHE_KEY_B10_, JSON.stringify(ceNoAccessFilesB10_()), CE_NO_ACCESS_CACHE_SECONDS_B10_); } catch (ignore) {}
   return {success: true, code: "NO_ACCESS_CACHE_PASS_B10"};
+}
+
+/**
+ * Review 10/11 mục 3 - ô có nền màu, không khai báo màu trống => phải BẬN.
+ * Mục 2 - tên màu không hỗ trợ phải được báo.
+ */
+function testColoredCellBusyV1() {
+  var colors = ["#ff0000", "#FF0000", "#ffff00", "#fff2cc", "#f3f3f3", "#fffffe", "#d9d9d9", "#00ff00", "#4a86e8", "#000000", "#8b4513"];
+  var raw = [["Ngày", "Villa"]], bgs = [["#ffffff", "#ffffff"]];
+  colors.forEach(function(col, i) { raw.push([String(i + 1), "3500"]); bgs.push(["#ffffff", col]); });
+  raw.push([String(colors.length + 1), "3500"]); bgs.push(["#ffffff", "#ffffff"]);
+  var c = {name: "Tháng 11", raw: raw, display: raw, backgrounds: bgs, notes: [], dateIndexV50: {}};
+  var villa = {id: "VL-C", name: "Villa"};
+  colors.forEach(function(col, i) {
+    var s = ceReadCalendarCellStateV34_(c, i + 1, 1, "AUTO", villa, "");
+    qualityAssertV1_(s.status === "BUSY", "nền " + col + " không khai báo màu trống phải BẬN, thực tế=" + s.status);
+  });
+  var white = ceReadCalendarCellStateV34_(c, colors.length + 1, 1, "AUTO", villa, "");
+  qualityAssertV1_(white.status === "FREE", "nền trắng #ffffff phải TRỐNG");
+
+  // Ô gộp: ô neo tô đỏ, các ô dưới trả về trắng => vẫn BẬN theo màu vùng gộp.
+  var merged = {name: "T11", raw: [["Ngày", "V"], ["1", ""], ["2", ""]], display: [["Ngày", "V"], ["1", ""], ["2", ""]],
+    backgrounds: [["#ffffff", "#ffffff"], ["#ffffff", "#ff0000"], ["#ffffff", "#ffffff"]], notes: [],
+    mergedCellsV52: {"2|1": {background: "#ff0000", anchorRow: 1, anchorColumn: 1, anchorDisplay: ""}}};
+  qualityAssertV1_(ceReadCalendarCellStateV34_(merged, 2, 1, "AUTO", villa, "").status === "BUSY", "ô thuộc vùng gộp tô đỏ phải BẬN");
+
+  // Ô ngoài vùng đã tải => CHƯA RÕ, không được TRỐNG.
+  var out = ceReadCalendarCellStateV34_(c, 1, 5, "AUTO", villa, "");
+  qualityAssertV1_(out.status === "UNKNOWN" && out.unknownReason === "BACKGROUND_NOT_LOADED", "ô ngoài vùng đã tải phải CHƯA RÕ");
+
+  // Khai báo màu trống: chỉ màu đó TRỐNG, màu khác vẫn BẬN; tên màu lạ không có tác dụng.
+  qualityAssertV1_(ceReadCalendarCellStateV34_(c, 3, 1, "AUTO;FREE_COLOR_GROUPS=VANG", villa, "").status === "FREE", "VANG khai báo trống => ô vàng TRỐNG");
+  qualityAssertV1_(ceReadCalendarCellStateV34_(c, 1, 1, "AUTO;FREE_COLOR_GROUPS=VANG", villa, "").status === "BUSY", "VANG trống nhưng ô đỏ vẫn BẬN");
+  qualityAssertV1_(ceReadCalendarCellStateV34_(c, 11, 1, "AUTO;FREE_COLOR_GROUPS=NAU", villa, "").status === "BUSY", "NAU không hỗ trợ => ô nâu vẫn BẬN");
+
+  var issues = ceFreeColorConfigIssuesV1_("AUTO;FREE_COLOR_GROUPS=VANG,NAU");
+  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_NAME_UNKNOWN" && issues[0].value === "NAU", "phải báo tên màu NAU");
+  issues = ceFreeColorConfigIssuesV1_("AUTO;MÀU_TRỐNG=#ff0");
+  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_HEX_INVALID", "phải báo mã màu 3 ký tự");
+  issues = ceFreeColorConfigIssuesV1_("AUTO;FREE_COLORS=#ffff00;MAU_TRONG=VANG");
+  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_KEY_IGNORED", "phải báo khóa màu bị bỏ qua");
+  qualityAssertV1_(ceFreeColorConfigIssuesV1_("AUTO;NHÓM_MÀU_TRỐNG=Vàng, Xanh lá, #ffff00").length === 0, "tên màu hợp lệ có dấu không bị báo");
+  return {success: true, code: "COLORED_CELL_BUSY_PASS_V1"};
 }

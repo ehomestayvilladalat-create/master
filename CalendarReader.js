@@ -2853,46 +2853,62 @@ function ceVillaNameScoreV40_(targetKey,targetTokens,item){
 }
 
 /*
- * B6 - Ô TRẮNG KHÔNG CÓ GIÁ = CHƯA RÕ (quyết định của chủ hệ thống 10/11/2026).
+ * B6 - Ô TRẮNG KHÔNG CÓ GIÁ.
  *
- * Chỉ áp dụng cho cột "thường ghi giá": trong các hàng ngày của tab, ít nhất 3 ô
- * và >= 20% số ô đọc được giá cho đúng căn/option này. Nguồn không ghi giá vào ô
- * lịch giữ nguyên quy tắc cũ (nền trắng = trống, giá "Liên hệ"), tránh mất cả nguồn.
+ * QUY TẮC ĐÃ CHỐT: nền trắng = TRỐNG (kể cả khi không có giá => "Liên hệ").
+ * B6 MẶC ĐỊNH TẮT. Khi bật, ở cột "thường ghi giá" (>= 3 ô và >= 20% ngày đọc được
+ * giá cho đúng căn/option), ô trắng mà không có giá được coi là CHƯA RÕ.
  *
- * Tắt cho một nguồn: CONFIG LỊCH thêm  O_TRANG_KHONG_GIA=TRONG  (hoặc WHITE_NO_PRICE=FREE).
- * Tắt toàn hệ thống: Script Property  BE_B6_WHITE_NO_PRICE = FREE.
+ * Bật toàn hệ thống : Script Property  BE_B6_WHITE_NO_PRICE = CHUA_RO  (hoặc UNKNOWN / ON)
+ * Bật cho một nguồn : CONFIG LỊCH thêm  O_TRANG_KHONG_GIA=CHUA_RO   (hoặc WHITE_NO_PRICE=UNKNOWN)
+ * Tắt cho một nguồn khi đã bật toàn hệ thống: CONFIG LỊCH  O_TRANG_KHONG_GIA=TRONG
+ * Cấu hình theo nguồn luôn thắng cấu hình toàn hệ thống.
  */
 var CE_B6_CACHE_ = {globalMode:null, configModes:{}};
 
+/** 'ON' | 'OFF' | '' (không khai báo). */
+function ceB6ParseModeV1_(value){
+  var v=String(value==null?'':value).trim();
+  if(!v)return '';
+  v=(typeof ceNormalize_==='function'?ceNormalize_(v):v.toLowerCase()).toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  if(['CHUA_RO','UNKNOWN','ON','BAT','TRUE','1'].indexOf(v)>=0)return 'ON';
+  if(['TRONG','FREE','OFF','TAT','FALSE','0'].indexOf(v)>=0)return 'OFF';
+  return '';
+}
+
 function ceB6GlobalModeV1_(){
   if(CE_B6_CACHE_.globalMode!==null)return CE_B6_CACHE_.globalMode;
-  var mode='UNKNOWN';
+  var mode='OFF';
   try{
-    var v=String(PropertiesService.getScriptProperties().getProperty('BE_B6_WHITE_NO_PRICE')||'').trim().toUpperCase();
-    if(v==='FREE'||v==='TRONG'||v==='OFF')mode='FREE';
+    if(ceB6ParseModeV1_(PropertiesService.getScriptProperties().getProperty('BE_B6_WHITE_NO_PRICE'))==='ON')mode='ON';
   }catch(ignore){}
   CE_B6_CACHE_.globalMode=mode;
   return mode;
 }
 
+/** Chế độ khai báo trong CONFIG LỊCH của nguồn: 'ON' | 'OFF' | ''. */
 function ceB6ConfigModeV1_(rawConfig){
   var key=String(rawConfig||'');
   if(Object.prototype.hasOwnProperty.call(CE_B6_CACHE_.configModes,key))return CE_B6_CACHE_.configModes[key];
-  var mode='UNKNOWN';
+  var mode='';
   try{
     var cfg=parseBookingSourceConfig(key||'AUTO')||{};
-    var v=String(beConfigValue_(cfg,['O_TRANG_KHONG_GIA','WHITE_NO_PRICE'],'')||'').trim().toUpperCase();
-    v=typeof ceNormalize_==='function'?ceNormalize_(v).toUpperCase():v;
-    if(v==='FREE'||v==='TRONG'||v==='OFF')mode='FREE';
+    mode=ceB6ParseModeV1_(beConfigValue_(cfg,['O_TRANG_KHONG_GIA','WHITE_NO_PRICE'],''));
   }catch(ignore){}
   CE_B6_CACHE_.configModes[key]=mode;
   return mode;
 }
 
+/** B6 có bật cho nguồn (CONFIG LỊCH) này không. Mặc định: KHÔNG. */
+function ceB6EnabledForConfigV1_(rawConfig){
+  var local=ceB6ConfigModeV1_(rawConfig);
+  if(local)return local==='ON';
+  return ceB6GlobalModeV1_()==='ON';
+}
+
 /** B6 - có coi ô trống-không-giá tại (c,col) là CHƯA RÕ không. */
 function ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel){
-  if(ceB6GlobalModeV1_()==='FREE')return false;
-  if(ceB6ConfigModeV1_(rawConfig)==='FREE')return false;
+  if(!ceB6EnabledForConfigV1_(rawConfig))return false;
   return ceColumnUsuallyHasPriceB6_(c,col,villa,optionLabel);
 }
 
@@ -2931,8 +2947,18 @@ function ceColumnUsuallyHasPriceB6_(c,col,villa,optionLabel){
 }
 
 function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
-  var raw=c.raw[row][col];
-  var display=c.display[row][col];
+  /*
+   * Review 10/11 mục 3: ô nằm ngoài vùng đã tải KHÔNG có dữ liệu màu. Bản cũ đọc
+   * undefined => '' => ceIsWhiteV34_('') = true => TRỐNG (sai hướng an toàn).
+   * Giờ trả CHƯA RÕ để không bao giờ báo trống khi không nhìn thấy màu ô.
+   */
+  var bgRowV1=c&&c.backgrounds?c.backgrounds[row]:null;
+  if(!bgRowV1||col<0||col>=bgRowV1.length||bgRowV1[col]===undefined||bgRowV1[col]===null){
+    return {status:'UNKNOWN',available:null,price:null,unknownReason:'BACKGROUND_NOT_LOADED',
+      reason:'Không đọc được màu ô (ngoài vùng đã tải)',background:'',display:'',note:''};
+  }
+  var raw=c.raw&&c.raw[row]?c.raw[row][col]:'';
+  var display=c.display&&c.display[row]?c.display[row][col]:'';
   var baseBg=String(c.backgrounds[row][col]||'').toLowerCase();
   var visualBgV52=ceVisualBackgroundV52_(c,row,col,baseBg);
   var bg=String(visualBgV52.background||baseBg||'').toLowerCase();
@@ -3111,6 +3137,58 @@ function ceIsBlueFamilyV42_(hex){
 
 // Alias giữ tương thích với bản V4.1 đã gửi trước.
 function ceColorMatchesFreeV41_(hex,name){return ceColorMatchesFreeV42_(hex,name);}
+
+/*
+ * Mục 2 (review 10/11) - Tên màu trong CONFIG LỊCH mà ceColorMatchesFreeV42_ không hiểu
+ * trước đây bị bỏ qua IM LẶNG (vd NAU). Hàm này liệt kê để cảnh báo ở cột trạng thái
+ * MASTER và Config Doctor. Không đổi cách đọc màu.
+ */
+var CE_FREE_COLOR_GROUP_NAMES_V1_ = {
+  trang:1, white:1, xam:1, gray:1, grey:1, cam:1, orange:1, vang:1, yellow:1, "do":1, red:1,
+  hong:1, pink:1, tim:1, purple:1, violet:1, xanh_la:1, xanhla:1, green:1,
+  xanh_duong:1, xanhduong:1, blue:1, xanh:1
+};
+var CE_FREE_COLOR_KEYS_V1_ = [
+  ['FREE_COLORS','MAU_TRONG','AVAILABLE_COLORS'],
+  ['FREE_COLOR_GROUPS','NHOM_MAU_TRONG','AVAILABLE_COLOR_GROUPS']
+];
+
+/** Trả danh sách vấn đề {code, key, value, message} của khai báo màu trống trong CONFIG LỊCH. */
+function ceFreeColorConfigIssuesV1_(rawConfig){
+  var issues=[];
+  var cfg={};
+  try{cfg=parseBookingSourceConfig(rawConfig||'')||{};}catch(e){return issues;}
+  CE_FREE_COLOR_KEYS_V1_.forEach(function(keys){
+    var used='';
+    keys.forEach(function(key){
+      var value=cfg[key];
+      if(value===undefined||value===null||String(value).trim()==='')return;
+      if(used){
+        issues.push({code:'FREE_COLOR_KEY_IGNORED',key:key,value:String(value),
+          message:key+'='+String(value)+' bị bỏ qua vì đã có '+used+' (chỉ khóa đầu tiên có tác dụng)'});
+        return;
+      }
+      used=key;
+      String(value).split(/[,|]+/).forEach(function(part){
+        var original=String(part||'').trim();
+        if(!original)return;
+        var name=ceNormalize_(original).replace(/[^a-z0-9#]+/g,'_').replace(/^_+|_+$/g,'');
+        if(name.indexOf('#')===0){
+          if(!/^#[0-9a-f]{6}$/.test(name)){
+            issues.push({code:'FREE_COLOR_HEX_INVALID',key:key,value:original,
+              message:'mã màu "'+original+'" không hợp lệ (cần đủ 6 ký tự, vd #ffff00) - đang không có tác dụng'});
+          }
+          return;
+        }
+        if(!CE_FREE_COLOR_GROUP_NAMES_V1_[name]){
+          issues.push({code:'FREE_COLOR_NAME_UNKNOWN',key:key,value:original,
+            message:'tên màu "'+original+'" ở '+key+' không được hỗ trợ - đang không có tác dụng (dùng: TRANG, XAM, CAM, VANG, DO, HONG, TIM, XANH_LA, XANH_DUONG hoặc mã #rrggbb)'});
+        }
+      });
+    });
+  });
+  return issues;
+}
 function ceIsWhiteV34_(h){return !h||h==='#ffffff'||h==='#fff'||h==='white';}
 function ceHexRgbV34_(h){var m=String(h||'').match(/^#?([0-9a-f]{6})$/i);if(!m)return null;return [parseInt(m[1].slice(0,2),16),parseInt(m[1].slice(2,4),16),parseInt(m[1].slice(4,6),16)];}
 function ceParseColorListV34_(v){return String(v||'').split(/[,|]+/).map(function(x){return ceNormalize_(x);}).filter(Boolean);}
