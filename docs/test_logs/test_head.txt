@@ -1,0 +1,216 @@
+# Log chạy test ngoài Apps Script - head (commit c94a0bb)
+# Thời điểm: 2026-11-11 00:36 +07 | Node v22.23.4 | TZ=Asia/Ho_Chi_Minh
+# PASS = logic thuần chạy đúng. NEEDS_LIVE = cần Google Sheet/Drive thật, KHÔNG chạy được ở đây, KHÔNG tính là đạt.
+
+{"PASS":121,"NEEDS_LIVE":82,"RETURNED_FALSE":2,"FAIL":6}
+PASS           testMasterIncrementalDisabledEmptyNoopV6110 
+PASS           testAiApplyStatusGuardV4222 
+PASS           testAiVillaCapacityRangeV13 
+NEEDS_LIVE     testAiConfigIgnoreV4221 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testAiConfigApplyGuardsV1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testAiModeSelectionV4222 
+NEEDS_LIVE     testAiConfigManualOnlyV12 NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+NEEDS_LIVE     testAiConfigValidatorV1NoWrite NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testAiVillaFactsBungalowRuleV11 
+PASS           testAiVillaFactsOptimisticLockV12 
+PASS           testHealthWatchButtonsV4221 
+NEEDS_LIVE     testHealthWatchV315 NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+PASS           testAiProjectBrainV4222 
+PASS           testAiBreakerRulesV1 
+RETURNED_FALSE testOpenAiV31 {"success":false,"error":"OPENAI_API_KEY_NOT_SET"}
+NEEDS_LIVE     testAiSourceInspectorV1ChonVilla NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testAiSourceInspectorV12Kina NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testAiSourceFastV4222 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testAiToolsV31 NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+PASS           testPublicApiBoundaryV61 
+NEEDS_LIVE     testEhomeAutoSyncNow NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testEhomeAutoSyncStatus NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+PASS           testInlineMonthMarkerCalendarV4223 
+NEEDS_LIVE     testNhaChangVangCalendarLiveV4223 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testCalendarSheetMonthAnchorV58 
+PASS           testCalendarRawYearAnchorV58 
+PASS           testConfigDoctorGrammarV327 
+PASS           testConfigDoctorNewSourcePendingV4211 
+PASS           testConfigDoctorV4Grammar 
+NEEDS_LIVE     testConfigDoctorDeepV4 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_10_19 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_20_29 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_30_39 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_40_49 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_50_59 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_60_69 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_70_79 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_80_89 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_90_99 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_100_109 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_110_119 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_120_129 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_130_139 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_140_149 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV4_150_150 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testConfigDoctorDeepV41_ALL NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+PASS           testConfigDoctorV41Grammar 
+PASS           testCustomerFilterContractV613 
+PASS           testCustomerRoomGroupingV616 
+PASS           testCustomerSanitizeDriverV616 
+PASS           testCustomerPricingV61 
+PASS           testCustomerSanitizeV61 
+PASS           testCustomerProductTypeV61 
+PASS           testCustomerLegacyWholeVillaV619 
+PASS           testCustomerSecurityV61 
+PASS           testEhomeCustomerFilterSuiteV613 
+NEEDS_LIVE     testCustomerConnectionFix16V1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testCustomerPriorityLogicV617 
+PASS           testGhostGuardV1 
+NEEDS_LIVE     testSystemHealthV30 NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+PASS           testImageAuditV342 
+PASS           testImageDriveCacheV17 
+PASS           testDriveFolderParserV4224 
+PASS           testImageRoomPriorityV615 
+PASS           testImageWorkerV330_ 
+PASS           testImageWorkerV330 
+PASS           testImagePipelineV342 
+PASS           testEhomeMaintenanceV620 
+PASS           testEhomeRegressionSuiteV620 
+PASS           testMasterActiveCalendarPolicyV4210 
+PASS           testNumericFixedRowRoomCodesV4223 
+NEEDS_LIVE     testSachiNumericRoomsLiveV4223 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testNhaChangVangSheetSelectionV4223 
+PASS           testMasterInactiveWindowReconcileV4210 
+NEEDS_LIVE     testMasterLeadingSpaceSourceV4210 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testMasterKinaCalendarLockV4210 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testAutoRowMergedInstructionV341 
+PASS           testDeletedSourceAutoGuardV619 
+PASS           testOverGridPriorityV415 
+PASS           testPrivateRoomPersistenceV4224 
+PASS           testDriveFolderImageSourceV4224 
+NEEDS_LIVE     testLynsPrivateRoomsLiveV4224 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testDriveFolderCalendarFallbackV4224 
+PASS           testMixedSourceProductTypeV612 
+NEEDS_LIVE     testFullOpsV312 NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+FAIL           testTelegramOpsV312 Chưa có TELEGRAM_ADMIN_CHAT_ID.
+NEEDS_LIVE     testSourceHealthV313 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testHealthWatchAntiSpamV314 NEEDS_LIVE_SERVICE:ScriptApp.getProjectTriggers
+PASS           testPnOverrideAndVillaConflictV1 
+NEEDS_LIVE     testPnOverrideSheetV1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testProductTypeFallbackV1 
+PASS           testEhomePropertyHubBridgeV1 
+PASS           testQualityFixesV1 
+PASS           testTabYearPolicyB4 
+PASS           testNamelessPriceColumnsB3 
+PASS           testBlankCellUnknownB6 
+PASS           testNewYearCalendarB5 
+PASS           testBatchedRowDeleteB7 
+PASS           testNoAccessCacheB10 
+PASS           testColoredCellBusyV1 
+PASS           testRepositoryProductTypeFallbackV4220 
+NEEDS_LIVE     testRepositoryPrivateRoomLiveV4220 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testScheduleSnapshotCoverageSummaryV341 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testScheduleSnapshotCoverageHealthV341 
+NEEDS_LIVE     testScheduleSnapshotReadV320 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+FAIL           testSnapshotABV320 INVALID_DATE_RANGE
+NEEDS_LIVE     testSnapshotABDefaultV320 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+FAIL           testSearchAvailableVillasLimited Ngày nhận hoặc ngày trả không hợp lệ.
+PASS           testSearchBalancedRecallV344 
+PASS           testSearchCapacityHighRecallV343 
+PASS           testSearchCapacityRangeV4220 
+PASS           testSearchAllowedVillaIdsV61 
+PASS           testSearchRoomFiltersV342 
+PASS           testSearchCityFilterV341 
+PASS           testSearchPriceHighRecallV341 
+NEEDS_LIVE     testSearchTraceDoctorV11 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSearchPaginationTraceV13 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testSearchAvailabilityTargetsV13 
+NEEDS_LIVE     testSearchTraceSelectorExactV12 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSearchTraceBalancedPositionsV13 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testSheetMonthNormalizerV1 
+NEEDS_LIVE     testSourceHealthV341 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testSourceHealthNewSourcePendingV4211 
+NEEDS_LIVE     testXlsxSourceOpenV_FIX NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testXlsxTempDecisionV1 
+PASS           testStructureConfirmationV340_ 
+PASS           testStructureConfirmationV340 
+PASS           testStructureLabelNoiseV341 
+NEEDS_LIVE     testVungHungAutoV341 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testPriorityStructureQueueV340 
+PASS           testMasterReconcileSweepFilterV618 
+NEEDS_LIVE     testSystemEventsV315 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+FAIL           testTelegramV31 Chưa có TELEGRAM_ADMIN_CHAT_ID.
+RETURNED_FALSE testTelegramPollingV315 {"success":false,"error":"TELEGRAM_ADMIN_CHAT_ID_NOT_SET"}
+NEEDS_LIVE     testTelegramButtonsV4221 NEEDS_LIVE_SERVICE:Utilities.newBlob
+FAIL           testTelegramImageV311 Chưa có TELEGRAM_ADMIN_CHAT_ID.
+FAIL           testTelegramEventsV311 Chưa có TELEGRAM_ADMIN_CHAT_ID.
+PASS           testTelegramReportV329_ 
+PASS           testTelegramReportV329 
+PASS           testTelegramUxV4222 
+NEEDS_LIVE     testTelegramButtonsV4222 NEEDS_LIVE_SERVICE:Utilities.newBlob
+PASS           testTelegramVietnameseV1 
+NEEDS_LIVE     testUnknownResolverV1 UR_TEST_FAIL: unknown id -> NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testVillaIdentityConfirmedRemoveAddV6111 
+PASS           testVillaIdentityEqualCardinalityStillBlockedV6111 
+PASS           testVillaIdentityLogicalSourceKeyV11 
+PASS           testVillaIdentityResolverV1 
+PASS           testVillaIdentityReviveRetiredV1 
+PASS           testConfigParser 
+PASS           testConfigParserV53 
+NEEDS_LIVE     testCE_Search NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testCE_PriceParser 
+NEEDS_LIVE     testCE_AutoReader NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testCE_DateColumnDetection 
+NEEDS_LIVE     testCE_SearchOneVilla NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testCE_SearchFiveVillas NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testBookingEngineSmoke NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testBookingSearch NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testMigrationV31 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testMasterMetadataConfigV32 
+PASS           testMasterMetadataConfigV31 
+NEEDS_LIVE     testMetadataReaderV32 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testMetadataReaderV31 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testBuildMasterV31 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testGhostVillaFilterV322 
+NEEDS_LIVE     testSearchNgay_8_10_8 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     test_08_10_Aug NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testAreaGroupV21 
+PASS           testFastMasterConfigV21 
+PASS           testFastSearchConfigV23 
+NEEDS_LIVE     testFastSearchBenchmarkV23 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testV30CoreConfig 
+PASS           testPriceEngineV30 
+NEEDS_LIVE     testCalendarAccuracyABV30 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testFastSearchBenchmarkV30 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testPriceFilterSearchV30 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testSourceReconcileFailSafeV416 
+PASS           testStaticInfoIntegrityV417 
+PASS           testStaticInfoPreservationV418 
+PASS           testSearchCompletenessInvariantV1 
+PASS           testSearchStaticFiltersV1 
+PASS           testSearchMinBedroomsContractV625 
+PASS           testSearchRankingPaginationV1 
+NEEDS_LIVE     testScheduleSnapshotStatusV1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testStaticDataReleaseGateV418 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSearchManualFieldsV1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testR2SearchRegressionV1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSearchCompletenessLiveV1 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testSearchSafetyV629 
+NEEDS_LIVE     testCustomerSearchLiveV629 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testConfiguredDateColumnSafetyV2 
+PASS           testLogicalSourceIdentityV2 
+PASS           testSourceProductTypeInheritanceV2 
+PASS           testSearchJourneyResolverV2 
+PASS           testSearchPatchV2UnitSuite 
+NEEDS_LIVE     testKnownSourceDateRecoveryLiveV2 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSourceProductTypeLiveV2 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSearchBedroomLiveV2 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testSearchCompletenessAccountingLiveV2 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testPriorityCalendarLayoutsV4193 
+PASS           testMasterSourceColumnIntegrityV4193 
+PASS           testNoCalendarActivityGuardV4194 
+PASS           testConfirmedRenameSkuPreservationV4194 
+PASS           testSourceColumnReorderReconcileV4195 
+NEEDS_LIVE     testProductTypeSchemaRepairV4196 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+NEEDS_LIVE     testDeletedSourceOrphanPreviewV4196 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
+PASS           testMasterNumericRoomNamesV4200 
+PASS           testStructureNumericRoomNamesV4200 
+PASS           testPriceParserV59 
+PASS           testPriceParserTrieuShorthandV59 
+PASS           testImageSourceColumnInvalidationV329 

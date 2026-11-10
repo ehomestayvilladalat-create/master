@@ -208,3 +208,29 @@ function auditConditionalColorsV1(startIndex, count) {
   Logger.log(JSON.stringify(out, null, 2));
   return out;
 }
+
+/**
+ * Review 10/11 mục 5 - TRƯỚC KHI xóa/đổi tên file: liệt kê trigger đang cài và
+ * kiểm tra hàm xử lý của từng trigger còn tồn tại không. Chỉ đọc.
+ *   checkTriggerHandlersV1()                       // trigger hiện tại
+ *   checkTriggerHandlersV1(["startSearchBenchmarkV1","runNextSearchBenchmarkV1"])  // + hàm sắp gỡ
+ */
+function checkTriggerHandlersV1(functionsToRemove) {
+  var removing = {};
+  (functionsToRemove || []).forEach(function(n) { removing[String(n)] = true; });
+  var g = (typeof globalThis !== "undefined") ? globalThis : this;
+  var rows = ScriptApp.getProjectTriggers().map(function(t) {
+    var handler = t.getHandlerFunction();
+    return {handler: handler, event: String(t.getEventType()), source: String(t.getTriggerSource()),
+      exists: typeof g[handler] === "function", willBeRemoved: !!removing[handler]};
+  });
+  var out = {success: true, code: "TRIGGER_HANDLER_CHECK_V1", triggers: rows.length,
+    missingHandlers: rows.filter(function(r) { return !r.exists; }),
+    blockedByRemoval: rows.filter(function(r) { return r.willBeRemoved; }),
+    all: rows};
+  out.verdict = out.missingHandlers.length || out.blockedByRemoval.length
+    ? "CẦN XỬ LÝ: có trigger trỏ tới hàm không tồn tại hoặc hàm sắp bị gỡ"
+    : "OK: mọi trigger đều có hàm xử lý và không dính hàm sắp gỡ";
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}

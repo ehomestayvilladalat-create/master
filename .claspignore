@@ -7,3 +7,5 @@ _backup_*/**
 **/_backup_*/**
 docs/**
 **/*.md
+tools/**
+**/package.json

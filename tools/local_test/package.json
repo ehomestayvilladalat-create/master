@@ -1,0 +1,12 @@
+{
+  "name": "ehome-local-test",
+  "private": true,
+  "description": "Chạy test Apps Script của EHOME ngoài Apps Script (Node + giả lập dịch vụ Google). Không đẩy lên Apps Script.",
+  "scripts": {
+    "test": "TZ=Asia/Ho_Chi_Minh node harness.js ../..",
+    "flow": "TZ=Asia/Ho_Chi_Minh node flow_b1b2.js ../..",
+    "callgraph": "node callgraph.js ../..",
+    "undefined-calls": "node check_undefined_calls.js ../.."
+  },
+  "devDependencies": {"acorn": "8.11.3", "acorn-walk": "8.3.2"}
+}

@@ -1,0 +1,18 @@
+# Mô phỏng chống căn ảo + mã căn (commit c94a0bb) - 2026-11-11 00:36 +07
+ok  : build 1: căn C biến mất -> chưa ẩn (chờ lần đọc 2)
+ok  : build lại ngay 10 phút sau -> vẫn chưa ẩn (chưa đủ 6 giờ)
+ok  : build 2: đọc giống -> cho phép ẩn (GHOST_GUARD_STABLE_READS_V1)
+ok  : sau khi ẩn: xóa trạng thái đếm (không còn property)
+ok  : chỉ dùng tối đa 1 property trạng thái
+ok  : giảm 3->1 (67%) -> chặn, không ẩn
+ok  : danh sách đổi so với lần trước -> đếm lại, chưa ẩn
+ok  : giảm >30% đọc ổn định 2 lần vẫn chặn khi chưa duyệt
+ok  : admin duyệt + đọc ổn định -> cho ẩn
+ok  : duyệt chỉ dùng 1 lần
+ok  : không có căn biến mất -> NO_REMOVAL như cũ
+ok  : giới hạn 40 căn ẩn mỗi lần build (thực tế 40)
+ok  : 45 nguồn chờ vẫn chỉ 1 property trạng thái
+ok  : căn C bị ẩn: RETIRED trong sổ mã, không xóa
+ok  : căn C quay lại -> lấy lại đúng mã VL-C
+ok  : sổ mã: VL-C active lại, trạng thái REVIVED
+ok  : căn mới khác tên ở cột cũ của C -> KHÔNG nhận mã VL-C

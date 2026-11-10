@@ -1,9 +1,9 @@
-# B8 - Hàm không còn được gọi (báo cáo tự động)
+# B8 - Hàm không còn được gọi (báo cáo tự động, cập nhật 10/11/2026)
 
-Công cụ: phân tích cú pháp toàn bộ file .js (acorn) + quét Index.html, dựng đồ thị gọi hàm.
+Công cụ: `tools/local_test/callgraph.js` - phân tích cú pháp toàn bộ file .js (acorn) + quét Index.html, dựng đồ thị gọi hàm.
 Gốc của đồ thị: mọi hàm public (chạy tay/trigger/google.script.run), code top-level, chuỗi tên hàm (trigger, menu, danh sách test), doGet/doPost/onOpen.
 
-## 1. Đã gỡ: 41 hàm nội bộ (tên kết thúc bằng `_`) không thể chạy tay và không còn đường gọi nào
+## 1. Đã gỡ: 41 hàm nội bộ (tên kết thúc bằng `_`) không có đường gọi nào
 
 Hàm có tên kết thúc bằng `_` không hiện trong menu Run của Apps Script và không gọi được từ web, nên không có đường gọi = chắc chắn không chạy.
 
@@ -51,13 +51,13 @@ Hàm có tên kết thúc bằng `_` không hiện trong menu Run của Apps Scr
 | Utils.js | `ceIsRed_` | 212 |
 | Utils.js | `ceIsYellow_` | 197 |
 
-Kiểm chứng sau khi gỡ: toàn bộ test chạy được ngoài Apps Script cho kết quả giống hệt trước khi gỡ (trừ 3 test nội bộ đã gỡ).
+Kiểm chứng sau khi gỡ: xem `docs/test_logs/so_sanh_test.md` (mọi test giống hệt trước khi gỡ, trừ 3 test nội bộ đã gỡ) và `tools/local_test/check_undefined_calls.js` (0 lời gọi tới hàm không tồn tại).
 
-## 2. Giữ lại, cần người quyết: 236 hàm public không có code nào gọi
+## 2. Giữ lại, cần người quyết: 242 hàm public không có code nào gọi
 
-Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc trigger cài tay). Không gỡ tự động.
+Chỉ chạy khi có người bấm Run trong Apps Script hoặc trigger cài tay. Không gỡ tự động. Trước khi gỡ hàm nào: chạy `checkTriggerHandlersV1([...tên hàm])`.
 
-### 2a. Hàm test chạy tay: 162 hàm (127 KB)
+### 2a. Hàm test chạy tay: 162 hàm (129 KB)
 
 - **Admin.js** (1): `testMasterIncrementalDisabledEmptyNoopV6110`
 - **AiConfigApply.js** (4): `testAiApplyStatusGuardV4222`, `testAiVillaCapacityRangeV13`, `testAiConfigIgnoreV4221`, `testAiConfigApplyGuardsV1`
@@ -91,7 +91,7 @@ Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc
 - **SearchTraceDoctorV1.js** (5): `testSearchTraceDoctorV11`, `testSearchPaginationTraceV13`, `testSearchAvailabilityTargetsV13`, `testSearchTraceSelectorExactV12`, `testSearchTraceBalancedPositionsV13`
 - **SheetMonthNormalizer.js** (1): `testSheetMonthNormalizerV1`
 - **SourceHealth.js** (2): `testSourceHealthV341`, `testSourceHealthNewSourcePendingV4211`
-- **SourceXlsxOpenV_FIX.js** (1): `testXlsxSourceOpenV_FIX`
+- **SourceXlsxOpen.js** (1): `testXlsxSourceOpenV_FIX`
 - **StructureSnapshot.js** (5): `testStructureConfirmationV340`, `testStructureLabelNoiseV341`, `testVungHungAutoV341`, `testPriorityStructureQueueV340`, `testMasterReconcileSweepFilterV618`
 - **SystemEventBus.js** (1): `testSystemEventsV315`
 - **TelegramBot.js** (8): `testTelegramV31`, `testTelegramPollingV315`, `testTelegramButtonsV4221`, `testTelegramImageV311`, `testTelegramEventsV311`, `testTelegramReportV329`, `testTelegramUxV4222`, `testTelegramButtonsV4222`
@@ -101,7 +101,7 @@ Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc
 - **configparser.js** (2): `testConfigParser`, `testConfigParserV53`
 - **test.js** (41): `testCE_Search`, `testCE_PriceParser`, `testCE_AutoReader`, `testCE_DateColumnDetection`, `testCE_SearchOneVilla`, `testCE_SearchFiveVillas`, `testBookingSearch`, `testMigrationV31`, `testMasterMetadataConfigV31`, `testMetadataReaderV31`, `testBuildMasterV31`, `testGhostVillaFilterV322`, `testSearchNgay_8_10_8`, `test_08_10_Aug`, `testAreaGroupV21`, `testFastMasterConfigV21`, `testFastSearchConfigV23`, `testFastSearchBenchmarkV23`, `testPriceEngineV30`, `testPriceFilterSearchV30`, `testScheduleSnapshotStatusV1`, `testStaticDataReleaseGateV418`, `testSearchManualFieldsV1`, `testR2SearchRegressionV1`, `testSearchCompletenessLiveV1`, `testCustomerSearchLiveV629`, `testSearchPatchV2UnitSuite`, `testKnownSourceDateRecoveryLiveV2`, `testSourceProductTypeLiveV2`, `testSearchBedroomLiveV2`, `testSearchCompletenessAccountingLiveV2`, `testMasterSourceColumnIntegrityV4193`, `testConfirmedRenameSkuPreservationV4194`, `testSourceColumnReorderReconcileV4195`, `testProductTypeSchemaRepairV4196`, `testDeletedSourceOrphanPreviewV4196`, `testMasterNumericRoomNamesV4200`, `testStructureNumericRoomNamesV4200`, `testPriceParserV59`, `testPriceParserTrieuShorthandV59`, `testImageSourceColumnInvalidationV329`
 
-### 2b. Công cụ vận hành / sửa lỗi chạy tay: 74 hàm
+### 2b. Công cụ vận hành / sửa lỗi chạy tay: 80 hàm
 
 | File | Hàm | Byte |
 |---|---|---|
@@ -120,6 +120,7 @@ Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc
 | AiHealthWatch.js:429 | `resetAiHealthWatchBaselineV315` | 88 |
 | AiHealthWatch.js:433 | `pauseAiHealthWatchV314` | 172 |
 | AiHealthWatch.js:438 | `resumeAiHealthWatchV314` | 209 |
+| AiService.js:169 | `getAiBreakerStatusV1` | 362 |
 | Api.js:3 | `doGet` | 1288 |
 | Api.js:38 | `doPost` | 1347 |
 | Api.js:110 | `apiSystemHealthV30` | 62 |
@@ -127,11 +128,11 @@ Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc
 | AuditNoAccessSources.js:58 | `auditNoAccessSourcesV1` | 2387 |
 | CalendarMetadata.js:28 | `getCalendarMetadata` | 256 |
 | ConfigDoctor.js:119 | `getConfigIssuesV312` | 517 |
-| ConfigDoctor.js:411 | `getConfigIssuesV4` | 650 |
+| ConfigDoctor.js:418 | `getConfigIssuesV4` | 650 |
 | ConfigDoctorV41.js:317 | `getConfigDoctorDeepV41AllState` | 174 |
 | ConfigDoctorV41.js:326 | `stopConfigDoctorDeepV41_ALL` | 263 |
 | ConfigGuide.js:5 | `createBookingConfigGuide` | 6198 |
-| GhostGuard.js:263 | `ghostStatusV1` | 399 |
+| GhostGuard.js:355 | `ghostStatusV1` | 1128 |
 | HiddenColumnHandler.js:131 | `purgeHiddenColumnSnapshotResetV1` | 267 |
 | HiddenColumnHandler.js:137 | `purgeHiddenColumnSnapshotDryRunV1` | 99 |
 | HiddenColumnHandler.js:141 | `purgeHiddenColumnSnapshotV1` | 94 |
@@ -147,16 +148,21 @@ Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc
 | MasterEngine.js:2237 | `isValidCalendarVillaName` | 90 |
 | MasterEngine.js:3456 | `debugMasterColumnLayout` | 1402 |
 | MasterEngine.js:3534 | `rebuildMasterVilla` | 59 |
-| MasterEngine.js:5461 | `repairMasterVillaProductTypeV4196` | 4370 |
-| MasterEngine.js:5614 | `applyDeletedSourceOrphansV4196` | 924 |
-| MasterEngine.js:6091 | `reconcileImageOverridesV330` | 121 |
+| MasterEngine.js:5487 | `repairMasterVillaProductTypeV4196` | 4370 |
+| MasterEngine.js:5640 | `applyDeletedSourceOrphansV4196` | 863 |
+| MasterEngine.js:6132 | `reconcileImageOverridesV330` | 121 |
+| MasterEngine.js:6214 | `showLastBuildTimingB7` | 226 |
+| OpsChecksV1.js:11 | `checkImageFolderC3` | 2875 |
+| OpsChecksV1.js:84 | `diagnoseCellColorV1` | 5801 |
+| OpsChecksV1.js:179 | `auditConditionalColorsV1` | 1772 |
+| OpsChecksV1.js:218 | `checkTriggerHandlersV1` | 1040 |
 | PROPERTIES_DOCTOR.gs.js:1 | `propertiesDoctor` | 902 |
 | PropertyHubBridge.js:247 | `getEhomePropertyHubStatusV1` | 431 |
 | Repositories.js:491 | `getBookingMasterVillas` | 66 |
 | ScheduleSnapshot.js:1104 | `migrateScheduleSnapshotLogicalKeysV2` | 392 |
 | ScheduleSnapshot.js:1122 | `repairScheduleSnapshotCoverageStatusesV341` | 3568 |
 | ScheduleSnapshot.js:1322 | `drainScheduleSnapshotQueueV322` | 486 |
-| SearchEngine.js:1689 | `searchAvailableVilla` | 267 |
+| SearchEngine.js:1733 | `searchAvailableVilla` | 267 |
 | SearchTraceDoctorV1.js:223 | `auditSearchRepositoryDropsV11` | 787 |
 | SnapshotReasonDoctorV1.js:7 | `diagnoseSnapshotReasonsV1` | 3381 |
 | SourceRepairTools.js:20 | `rebuildSourcesAfterConfigFixV1` | 711 |
@@ -179,8 +185,3 @@ Các hàm này chỉ chạy khi có người bấm Run trong Apps Script (hoặc
 | VillaIdentity.js:43 | `disableVillaIdentityV1` | 246 |
 | VillaIdentity.js:50 | `initializeVillaIdentityRegistryV1` | 2461 |
 | VillaIdentity.js:172 | `diagnoseBlankMasterSkuV12` | 1142 |
-
-## 3. Đề xuất
-
-- Các hàm ở mục 2b có hậu tố phiên bản cũ (V31, V312, V328...) là công cụ sửa lỗi một lần của các đợt trước. Đề xuất: anh/kỹ thuật xem lướt danh sách, hàm nào chắc chắn không dùng nữa thì gỡ theo lô, mỗi lô chạy lại testQualityFixesV1 và testEhomeRegressionSuiteV620.
-- File test (test.js, OpsTests.gs.js, PnOverrideTestV1.js) vẫn để trong dự án vì hàm testEhomeRegressionSuiteV620 gọi tới. Chúng không chạy khi khách/sale dùng app, chỉ tốn thời gian nạp code rất nhỏ.

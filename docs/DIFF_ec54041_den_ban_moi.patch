@@ -1,0 +1,3734 @@
+diff --git a/.claspignore b/.claspignore
+index a014a44..c56cff1 100644
+--- a/.claspignore
++++ b/.claspignore
+@@ -1,7 +1,9 @@
+-_backup_*/
++# Không đẩy lên Apps Script: thư mục backup, tài liệu, file ẩn.
++**/.*
++**/.*/**
++**/node_modules/**
+ _backup_*
++_backup_*/**
+ **/_backup_*/**
+-node_modules/**
+-.git/**
+-*.md
+-.claspignore
++docs/**
++**/*.md
+diff --git a/Admin.js b/Admin.js
+index dbb276d..1a8eb18 100644
+--- a/Admin.js
++++ b/Admin.js
+@@ -907,27 +907,6 @@ function getMasterIncrementalStatusV328(){
+ 
+ /* ================= END V3.2.8 INCREMENTAL MASTER ================= */
+ 
+-function beLogSystemErrorV34_(code,source,villa,message){
+-  try{
+-    var ss=SpreadsheetApp.getActiveSpreadsheet();
+-    var sh=ss.getSheetByName('SYSTEM_ERRORS')||ss.insertSheet('SYSTEM_ERRORS');
+-    if(sh.getLastRow()===0){
+-      sh.appendRow(['THỜI GIAN','MÃ LỖI','NGUỒN','CĂN','NỘI DUNG']);
+-    }
+-    sh.appendRow([new Date(),code,source||'',villa||'',message||'']);
+-  }catch(ignore){}
+-}
+-
+-function beReadSystemErrorsV34_(limit){
+-  var sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SYSTEM_ERRORS');
+-  if(!sh||sh.getLastRow()<2)return[];
+-  var n=Math.min(Number(limit||50),sh.getLastRow()-1);
+-  var v=sh.getRange(sh.getLastRow()-n+1,1,n,5).getDisplayValues();
+-  return v.reverse().map(function(r){
+-    return {time:r[0],code:r[1],source:r[2],villa:r[3],message:r[4]};
+-  });
+-}
+-
+ function setupMasterAreaOptionsV21(){
+   var ss=SpreadsheetApp.getActiveSpreadsheet();
+   var sheet=ss.getSheetByName(BE_CONFIG.MASTER_SHEET);
+diff --git a/AiService.js b/AiService.js
+index 45e0139..23a933e 100644
+--- a/AiService.js
++++ b/AiService.js
+@@ -51,6 +51,13 @@ function aiAskWithModelV312_(message, deep) {
+ }
+ 
+ function aiCallResponsesV31_(payload, apiKey, kind) {
++  // C1: đang ngắt mạch (hết tiền/khóa API) => không gọi OpenAI, trả lỗi ngay.
++  var breaker = aiBreakerStateV1_();
++  if (breaker && Number(breaker.openUntil || 0) > Date.now()) {
++    return {success:false,error:"AI_CIRCUIT_OPEN",httpCode:Number(breaker.httpCode || 0),
++      message:"AI đang tạm ngưng (" + String(breaker.reason || "") + "), tự thử lại lúc " + aiFormatTimeV1_(breaker.openUntil) +
++        ". Nạp tiền/sửa key xong chạy aiResetBreakerV1() để mở ngay."};
++  }
+   var started = Date.now(), resp;
+   try {
+     resp = UrlFetchApp.fetch("https://api.openai.com/v1/responses",{method:"post",contentType:"application/json",headers:{Authorization:"Bearer "+apiKey},payload:JSON.stringify(payload),muteHttpExceptions:true});
+@@ -60,12 +67,131 @@ function aiCallResponsesV31_(payload, apiKey, kind) {
+   aiRecordUsageV312_(kind || "NORMAL",payload.model,data,code,Date.now()-started);
+   if (code < 200 || code >= 300) {
+     var msg = data && data.error && data.error.message ? data.error.message : text;
+-    if (typeof beEmitSystemEventV30_ === "function") beEmitSystemEventV30_("ERROR","AI_API_ERROR",{message:String(msg||"OpenAI API error"),httpCode:code});
+-    return {success:false,error:"OPENAI_API_ERROR",httpCode:code,message:String(msg || "")};
++    var errCode = data && data.error ? String(data.error.code || data.error.type || "") : "";
++    var trip = aiBreakerShouldTripV1_(code, errCode, msg);
++    if (trip) {
++      aiBreakerOpenV1_(code, trip, msg);
++    } else if (typeof beEmitSystemEventV30_ === "function") {
++      beEmitSystemEventV30_("ERROR","AI_API_ERROR",{message:String(msg||"OpenAI API error"),httpCode:code});
++    }
++    return {success:false,error:trip ? "AI_CIRCUIT_OPEN" : "OPENAI_API_ERROR",httpCode:code,message:String(msg || "")};
+   }
++  if (breaker) aiBreakerCloseV1_("OPENAI_OK_AFTER_RETRY");
+   return {success:true,data:data,elapsedMs:Date.now()-started};
+ }
+ 
++/*
++ * C1 - NGẮT MẠCH AI KHI HẾT TIỀN / KHÓA API
++ * - 401 (key sai/hết hạn), 402 (thanh toán), 403 (bị chặn), 429 do hết hạn mức
++ *   (insufficient_quota/billing) => ngưng gọi OpenAI 1 giờ. 429 do gọi quá nhanh thì không ngắt.
++ * - Hết giờ: lần gọi kế tiếp thử lại thật; vẫn lỗi => ngưng thêm 1 giờ (không báo lại).
++ * - Báo Telegram admin 1 lần cho mỗi đợt; ghi SYSTEM_EVENT_LOG_V3 (AI_CIRCUIT_OPEN / AI_CIRCUIT_CLOSED).
++ * - Nạp tiền xong: chạy aiResetBreakerV1(). Xem trạng thái: getAiBreakerStatusV1().
++ */
++var EHOME_AI_BREAKER_V1 = {PROPERTY: "EHOME_AI_BREAKER_V1", OPEN_MS: 3600000};
++
++function aiBreakerShouldTripV1_(httpCode, errCode, message) {
++  httpCode = Number(httpCode || 0);
++  var text = (String(errCode || "") + " " + String(message || "")).toLowerCase();
++  if (httpCode === 401) return "KEY_INVALID_OR_EXPIRED_401";
++  if (httpCode === 402) return "PAYMENT_REQUIRED_402";
++  if (httpCode === 403) return "FORBIDDEN_403";
++  if (httpCode === 429 && /insufficient_quota|quota|billing|credit|hard limit|exceeded your current/.test(text)) return "QUOTA_EXHAUSTED_429";
++  return "";
++}
++
++function aiBreakerStateV1_() {
++  try {
++    var raw = PropertiesService.getScriptProperties().getProperty(EHOME_AI_BREAKER_V1.PROPERTY);
++    return raw ? JSON.parse(raw) : null;
++  } catch (e) { return null; }
++}
++
++function aiBreakerOpenV1_(httpCode, reason, message) {
++  var prev = aiBreakerStateV1_();
++  var now = Date.now();
++  var state = {
++    reason: String(reason || ""), httpCode: Number(httpCode || 0),
++    message: String(message || "").slice(0, 300),
++    episodeStart: prev && prev.episodeStart ? prev.episodeStart : now,
++    openedAt: now, openUntil: now + EHOME_AI_BREAKER_V1.OPEN_MS,
++    retries: prev ? Number(prev.retries || 0) + 1 : 0,
++    notified: !!(prev && prev.notified)
++  };
++  if (!state.notified) {
++    state.notified = aiBreakerNotifyV1_("🔴 AI (OpenAI) tạm ngưng: " + state.reason + " (HTTP " + state.httpCode + ").\n" +
++      String(state.message || "") + "\nHệ thống tự thử lại mỗi giờ. Nạp tiền/sửa key xong chạy aiResetBreakerV1() để mở ngay.\n" +
++      "Tìm căn/lịch/giá KHÔNG bị ảnh hưởng (không dùng AI).");
++  }
++  try { PropertiesService.getScriptProperties().setProperty(EHOME_AI_BREAKER_V1.PROPERTY, JSON.stringify(state)); } catch (ignore) {}
++  if (typeof beEmitSystemEventV30_ === "function") {
++    beEmitSystemEventV30_("ERROR", "AI_CIRCUIT_OPEN", {message: "AI tạm ngưng: " + state.reason, httpCode: state.httpCode,
++      retries: state.retries, openUntil: new Date(state.openUntil).toISOString()});
++  }
++  return state;
++}
++
++function aiBreakerCloseV1_(reason) {
++  var prev = aiBreakerStateV1_();
++  try { PropertiesService.getScriptProperties().deleteProperty(EHOME_AI_BREAKER_V1.PROPERTY); } catch (ignore) {}
++  if (prev) {
++    if (typeof beEmitSystemEventV30_ === "function") {
++      beEmitSystemEventV30_("INFO", "AI_CIRCUIT_CLOSED", {message: "AI hoạt động lại (" + String(reason || "") + ")", previousReason: prev.reason});
++    }
++    if (prev.notified) aiBreakerNotifyV1_("🟢 AI (OpenAI) đã hoạt động lại.");
++  }
++  return {success: true, code: "AI_CIRCUIT_CLOSED_V1", wasOpen: !!prev, reason: String(reason || "")};
++}
++
++function aiBreakerNotifyV1_(text) {
++  try {
++    if (typeof sendTelegramMessageV31_ !== "function" || typeof tgPropertyV315_ !== "function") return false;
++    var chat = tgPropertyV315_("TELEGRAM_ADMIN_CHAT_ID");
++    if (!chat) return false;
++    var r = sendTelegramMessageV31_(chat, text);
++    return !!(r && r.success !== false);
++  } catch (e) { return false; }
++}
++
++function aiFormatTimeV1_(ms) {
++  try { return Utilities.formatDate(new Date(Number(ms)), Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh", "HH:mm dd/MM"); }
++  catch (e) { return new Date(Number(ms)).toISOString(); }
++}
++
++/** Mở lại AI ngay (sau khi nạp tiền / sửa key). */
++function aiResetBreakerV1() {
++  var r = aiBreakerCloseV1_("MANUAL_RESET");
++  Logger.log(JSON.stringify(r));
++  return r;
++}
++
++/** Xem trạng thái ngắt mạch AI. */
++function getAiBreakerStatusV1() {
++  var st = aiBreakerStateV1_();
++  var r = st
++    ? {success: true, open: Number(st.openUntil || 0) > Date.now(), reason: st.reason, httpCode: st.httpCode,
++       retryAt: aiFormatTimeV1_(st.openUntil), retries: st.retries, notified: st.notified}
++    : {success: true, open: false};
++  Logger.log(JSON.stringify(r));
++  return r;
++}
++
++/** Test thuần cho quy tắc ngắt mạch (không gọi OpenAI, không đổi trạng thái thật). */
++function testAiBreakerRulesV1() {
++  var cases = [
++    [aiBreakerShouldTripV1_(401, "invalid_api_key", "Incorrect API key"), "KEY_INVALID_OR_EXPIRED_401"],
++    [aiBreakerShouldTripV1_(402, "", ""), "PAYMENT_REQUIRED_402"],
++    [aiBreakerShouldTripV1_(403, "", "Country not supported"), "FORBIDDEN_403"],
++    [aiBreakerShouldTripV1_(429, "insufficient_quota", "You exceeded your current quota"), "QUOTA_EXHAUSTED_429"],
++    [aiBreakerShouldTripV1_(429, "rate_limit_exceeded", "Rate limit reached, try again in 2s"), ""],
++    [aiBreakerShouldTripV1_(500, "server_error", ""), ""]
++  ];
++  cases.forEach(function(c, i) { if (c[0] !== c[1]) throw new Error("AI_BREAKER_RULE_FAIL case " + (i + 1) + ": " + c[0]); });
++  var r = {success: true, code: "AI_BREAKER_RULES_PASS_V1", cases: cases.length};
++  Logger.log(JSON.stringify(r));
++  return r;
++}
++
+ function aiExtractTextV31_(response) {
+   if (response && typeof response.output_text === "string" && response.output_text.trim()) return response.output_text.trim();
+   var texts=[];
+diff --git a/CalendarContext.js b/CalendarContext.js
+index ca9e4a3..c91b9b3 100644
+--- a/CalendarContext.js
++++ b/CalendarContext.js
+@@ -31,17 +31,6 @@ function ceCreateSourceContextV30_(openedFile, plan) {
+   };
+ }
+ 
+-function ceMarkSafeFallbackV30_(sourceContext, payload) {
+-  if (sourceContext) {
+-    sourceContext.fastTimingV30 = sourceContext.fastTimingV30 || {};
+-    sourceContext.fastTimingV30.safeFallbacks =
+-      Number(sourceContext.fastTimingV30.safeFallbacks || 0) + 1;
+-  }
+-
+-  var out = payload || {};
+-  out.code = out.code || "CALENDAR_SAFE_FALLBACK_V30";
+-  Logger.log(JSON.stringify(out));
+-}
+ 
+ function ceCalendarConfidenceV30_(readResult) {
+   if (!readResult || readResult.available !== true) return "BLOCKED";
+diff --git a/CalendarReader.js b/CalendarReader.js
+index 9a3a6f1..954f858 100644
+--- a/CalendarReader.js
++++ b/CalendarReader.js
+@@ -427,6 +427,11 @@ function ceSheetMonthV50_(sheetName) {
+ }
+ 
+ function ceSheetYearV50_(sheetName, fallbackYear) {
++  return ceSheetExplicitYearB5_(sheetName) || Number(fallbackYear || new Date().getFullYear());
++}
++
++/** B5 - năm ghi rõ trên tên tab; 0 nếu tên không có năm hợp lệ. */
++function ceSheetExplicitYearB5_(sheetName) {
+   try {
+     if (typeof ceExtractYearFromSheetName_ === "function") {
+       var existing = Number(ceExtractYearFromSheetName_(sheetName) || 0);
+@@ -443,8 +448,26 @@ function ceSheetYearV50_(sheetName, fallbackYear) {
+     var yy = Number(m[1]);
+     if (yy >= 20 && yy <= 99) return 2000 + yy;
+   }
++  return 0;
++}
+ 
+-  return Number(fallbackYear || new Date().getFullYear());
++/**
++ * B5 - QUY TẮC NĂM DUY NHẤT cho tên tab (dùng chung build MASTER, tìm căn, snapshot):
++ * - tên có năm hợp lệ: dùng năm đó;
++ * - tên không có năm: năm làm tháng của tab gần ngày tham chiếu nhất trong ±1 tháng
++ *   (tìm 2/1/2027 thì "Tháng 12" = 12/2026; tìm 30/12/2026 thì "Tháng 1" = 1/2027);
++ * - còn lại: năm của ngày tham chiếu (như cũ).
++ */
++function ceSheetYearForDateB5_(sheetName, sheetMonth, referenceDate) {
++  if (!(referenceDate instanceof Date) || isNaN(referenceDate.getTime())) referenceDate = new Date();
++  var explicit = ceSheetExplicitYearB5_(sheetName);
++  if (explicit) return explicit;
++  sheetMonth = Number(sheetMonth || 0);
++  if (sheetMonth >= 1 && sheetMonth <= 12 && typeof beNearestYearForMonthB4_ === "function") {
++    var near = beNearestYearForMonthB4_(sheetMonth, referenceDate, 1);
++    if (near) return near;
++  }
++  return referenceDate.getFullYear();
+ }
+ 
+ function ceInlineMonthMarkerV4223_(rawValue, displayValue, fallbackYear, previousMarker) {
+@@ -894,7 +917,7 @@ function ceDetectDateColumnV1_(
+     : maxColumns;
+ 
+   var sheetMonth = ceSheetMonthV50_(sheetName);
+-  var sheetYear = ceSheetYearV50_(sheetName, fallbackDate.getFullYear());
++  var sheetYear = ceSheetYearForDateB5_(sheetName, sheetMonth, fallbackDate);
+   var scanRows = ceDateRowsForScanV50_(rowCount, readConfig);
+ 
+   var bestColumn = -1;
+@@ -1144,6 +1167,14 @@ function ceReadColumnCalendarV34_(
+       };
+     }
+ 
++    if (state.status === "UNKNOWN" && state.unknownReason === "WHITE_NO_PRICE_B6") {
++      throw new Error(
++        "WHITE_NO_PRICE_B6: Ô trống nhưng không có giá tại " +
++        loc.context.name + "!" + ceColumnToLetterV33_(loc.column + 1) + (loc.row + 1) +
++        " - cần kiểm tra lịch/giá"
++      );
++    }
++
+     if (state.status === "UNKNOWN") {
+       throw new Error(
+         "Không xác định trạng thái màu tại " +
+@@ -1460,7 +1491,7 @@ function ceCalendarSheetBucketForDateV54_(sheetName, targetDate) {
+   }
+ 
+   var month = ceSheetMonthV50_(sheetName);
+-  var year = ceSheetYearV50_(sheetName, targetYear);
++  var year = ceSheetYearForDateB5_(sheetName, month, targetDate);
+ 
+   if (!month) return "UNKNOWN";
+   if (month === targetMonth && (!year || year === targetYear)) return "TARGET";
+@@ -1519,7 +1550,7 @@ function ceCalendarCandidateSheetsV34_(file, targetDate, rawConfig) {
+ 
+   function bucket_(sheet) {
+     var month = ceSheetMonthV50_(sheet.getName());
+-    var year = ceSheetYearV50_(sheet.getName(), targetYear);
++    var year = ceSheetYearForDateB5_(sheet.getName(), month, targetDate);
+ 
+     if (!month) {
+       return {sheet: sheet, bucket: "UNKNOWN", month: 0, year: year};
+@@ -1622,6 +1653,7 @@ function ceLoadCalendarSheetV34_(
+   ) {
+     if (fallbackDate instanceof Date && !isNaN(fallbackDate.getTime())) {
+       c.dateReferenceYearV4223 = fallbackDate.getFullYear();
++      c.dateReferenceDateB5 = c.dateReferenceDateB5 || new Date(fallbackDate.getTime());
+     }
+     if (sourceContext.fastTimingV30) {
+       sourceContext.fastTimingV30.contextHits = Number(sourceContext.fastTimingV30.contextHits || 0) + 1;
+@@ -1778,6 +1810,7 @@ function ceLoadCalendarSheetV34_(
+ 
+   if (fallbackDate instanceof Date && !isNaN(fallbackDate.getTime())) {
+     c.dateReferenceYearV4223 = fallbackDate.getFullYear();
++    c.dateReferenceDateB5 = c.dateReferenceDateB5 || new Date(fallbackDate.getTime());
+   }
+ 
+   if (c.dateConfigKeyV50 !== configKey) {
+@@ -2047,10 +2080,10 @@ function ceBuildCalendarDateIndexV50_(c) {
+   };
+ 
+   var sheetMonth = ceSheetMonthV50_(c.name);
+-  var sheetYear = ceSheetYearV50_(
+-    c.name,
+-    Number(c.dateReferenceYearV4223 || new Date().getFullYear())
+-  );
++  // B5: năm theo quy tắc chung, tham chiếu NGÀY đầu tiên dùng tab này (không chỉ năm).
++  var sheetYear = c.dateReferenceDateB5 instanceof Date
++    ? ceSheetYearForDateB5_(c.name, sheetMonth, c.dateReferenceDateB5)
++    : ceSheetYearV50_(c.name, Number(c.dateReferenceYearV4223 || new Date().getFullYear()));
+ 
+   var rowIndexes = ceDateRowsForScanV50_(
+     c.display.length,
+@@ -2819,9 +2852,113 @@ function ceVillaNameScoreV40_(targetKey,targetTokens,item){
+   return score;
+ }
+ 
++/*
++ * B6 - Ô TRẮNG KHÔNG CÓ GIÁ.
++ *
++ * QUY TẮC ĐÃ CHỐT: nền trắng = TRỐNG (kể cả khi không có giá => "Liên hệ").
++ * B6 MẶC ĐỊNH TẮT. Khi bật, ở cột "thường ghi giá" (>= 3 ô và >= 20% ngày đọc được
++ * giá cho đúng căn/option), ô trắng mà không có giá được coi là CHƯA RÕ.
++ *
++ * Bật toàn hệ thống : Script Property  BE_B6_WHITE_NO_PRICE = CHUA_RO  (hoặc UNKNOWN / ON)
++ * Bật cho một nguồn : CONFIG LỊCH thêm  O_TRANG_KHONG_GIA=CHUA_RO   (hoặc WHITE_NO_PRICE=UNKNOWN)
++ * Tắt cho một nguồn khi đã bật toàn hệ thống: CONFIG LỊCH  O_TRANG_KHONG_GIA=TRONG
++ * Cấu hình theo nguồn luôn thắng cấu hình toàn hệ thống.
++ */
++var CE_B6_CACHE_ = {globalMode:null, configModes:{}};
++
++/** 'ON' | 'OFF' | '' (không khai báo). */
++function ceB6ParseModeV1_(value){
++  var v=String(value==null?'':value).trim();
++  if(!v)return '';
++  v=(typeof ceNormalize_==='function'?ceNormalize_(v):v.toLowerCase()).toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');
++  if(['CHUA_RO','UNKNOWN','ON','BAT','TRUE','1'].indexOf(v)>=0)return 'ON';
++  if(['TRONG','FREE','OFF','TAT','FALSE','0'].indexOf(v)>=0)return 'OFF';
++  return '';
++}
++
++function ceB6GlobalModeV1_(){
++  if(CE_B6_CACHE_.globalMode!==null)return CE_B6_CACHE_.globalMode;
++  var mode='OFF';
++  try{
++    if(ceB6ParseModeV1_(PropertiesService.getScriptProperties().getProperty('BE_B6_WHITE_NO_PRICE'))==='ON')mode='ON';
++  }catch(ignore){}
++  CE_B6_CACHE_.globalMode=mode;
++  return mode;
++}
++
++/** Chế độ khai báo trong CONFIG LỊCH của nguồn: 'ON' | 'OFF' | ''. */
++function ceB6ConfigModeV1_(rawConfig){
++  var key=String(rawConfig||'');
++  if(Object.prototype.hasOwnProperty.call(CE_B6_CACHE_.configModes,key))return CE_B6_CACHE_.configModes[key];
++  var mode='';
++  try{
++    var cfg=parseBookingSourceConfig(key||'AUTO')||{};
++    mode=ceB6ParseModeV1_(beConfigValue_(cfg,['O_TRANG_KHONG_GIA','WHITE_NO_PRICE'],''));
++  }catch(ignore){}
++  CE_B6_CACHE_.configModes[key]=mode;
++  return mode;
++}
++
++/** B6 có bật cho nguồn (CONFIG LỊCH) này không. Mặc định: KHÔNG. */
++function ceB6EnabledForConfigV1_(rawConfig){
++  var local=ceB6ConfigModeV1_(rawConfig);
++  if(local)return local==='ON';
++  return ceB6GlobalModeV1_()==='ON';
++}
++
++/** B6 - có coi ô trống-không-giá tại (c,col) là CHƯA RÕ không. */
++function ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel){
++  if(!ceB6EnabledForConfigV1_(rawConfig))return false;
++  return ceColumnUsuallyHasPriceB6_(c,col,villa,optionLabel);
++}
++
++function ceWhiteNoPriceStateB6_(bg,display,note,baseReason){
++  return {
++    status:'UNKNOWN',available:null,price:null,unknownReason:'WHITE_NO_PRICE_B6',
++    reason:baseReason+' nhưng không có giá - cần kiểm tra',
++    background:bg,display:String(display||''),note:String(note||'')
++  };
++}
++
++/** B6 - cột của căn có thói quen ghi giá: >= 3 ô và >= 20% hàng ngày đọc được giá. */
++function ceColumnUsuallyHasPriceB6_(c,col,villa,optionLabel){
++  if(!c)return false;
++  c.priceColumnCacheB6=c.priceColumnCacheB6||{};
++  var key=[col,String(optionLabel||''),String(villa&&(villa.id||villa.name)||''),String(villa&&villa.bedrooms||'')].join('|');
++  if(Object.prototype.hasOwnProperty.call(c.priceColumnCacheB6,key))return c.priceColumnCacheB6[key];
++  var rows=[],seen={};
++  var idx=c.dateIndexV50||{};
++  Object.keys(idx).forEach(function(k){var r=Number(idx[k]);if(isFinite(r)&&r>=0&&!seen[r]){seen[r]=true;rows.push(r);}});
++  if(!rows.length){
++    var maxRows=Math.max((c.display||[]).length,(c.raw||[]).length);
++    for(var i=1;i<maxRows;i++)rows.push(i);
++  }
++  var priced=0;
++  rows.forEach(function(r){
++    var raw=c.raw&&c.raw[r]?c.raw[r][col]:'';
++    var disp=c.display&&c.display[r]?c.display[r][col]:'';
++    var p=ceParsePriceForVillaV59_(raw,villa,optionLabel);
++    if(p===null)p=ceParsePriceForVillaV59_(disp,villa,optionLabel);
++    if(p!==null)priced++;
++  });
++  var result=priced>=3&&priced>=Math.ceil(rows.length*0.2);
++  c.priceColumnCacheB6[key]=result;
++  return result;
++}
++
+ function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
+-  var raw=c.raw[row][col];
+-  var display=c.display[row][col];
++  /*
++   * Review 10/11 mục 3: ô nằm ngoài vùng đã tải KHÔNG có dữ liệu màu. Bản cũ đọc
++   * undefined => '' => ceIsWhiteV34_('') = true => TRỐNG (sai hướng an toàn).
++   * Giờ trả CHƯA RÕ để không bao giờ báo trống khi không nhìn thấy màu ô.
++   */
++  var bgRowV1=c&&c.backgrounds?c.backgrounds[row]:null;
++  if(!bgRowV1||col<0||col>=bgRowV1.length||bgRowV1[col]===undefined||bgRowV1[col]===null){
++    return {status:'UNKNOWN',available:null,price:null,unknownReason:'BACKGROUND_NOT_LOADED',
++      reason:'Không đọc được màu ô (ngoài vùng đã tải)',background:'',display:'',note:''};
++  }
++  var raw=c.raw&&c.raw[row]?c.raw[row][col]:'';
++  var display=c.display&&c.display[row]?c.display[row][col]:'';
+   var baseBg=String(c.backgrounds[row][col]||'').toLowerCase();
+   var visualBgV52=ceVisualBackgroundV52_(c,row,col,baseBg);
+   var bg=String(visualBgV52.background||baseBg||'').toLowerCase();
+@@ -2838,6 +2975,10 @@ function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
+    * - tất cả màu khác = bận.
+    */
+   if(ceIsWhiteV34_(bg)){
++    // B6: cột thường ghi giá mà ô trắng này không có giá => CHƯA RÕ, không mặc định TRỐNG.
++    if(price===null&&ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel)){
++      return ceWhiteNoPriceStateB6_(bg,display,note,'Nền trắng');
++    }
+     return {status:'FREE',available:true,price:price,reason:'Nền trắng',background:bg,display:String(display||''),note:String(note||'')};
+   }
+ 
+@@ -2852,6 +2993,9 @@ function ceReadCalendarCellStateV34_(c,row,col,rawConfig,villa,optionLabel){
+   if(configuredFreeColors.some(function(name){
+     return ceColorMatchesFreeV41_(bg,name);
+   })){
++    if(price===null&&ceWhiteNoPriceIsUnknownB6_(c,col,rawConfig,villa,optionLabel)){
++      return ceWhiteNoPriceStateB6_(bg,display,note,'Màu trống theo CONFIG');
++    }
+     return {status:'FREE',available:true,price:price,reason:'Màu trống theo CONFIG',background:bg,display:String(display||''),note:String(note||'')};
+   }
+ 
+@@ -2993,9 +3137,60 @@ function ceIsBlueFamilyV42_(hex){
+ 
+ // Alias giữ tương thích với bản V4.1 đã gửi trước.
+ function ceColorMatchesFreeV41_(hex,name){return ceColorMatchesFreeV42_(hex,name);}
++
++/*
++ * Mục 2 (review 10/11) - Tên màu trong CONFIG LỊCH mà ceColorMatchesFreeV42_ không hiểu
++ * trước đây bị bỏ qua IM LẶNG (vd NAU). Hàm này liệt kê để cảnh báo ở cột trạng thái
++ * MASTER và Config Doctor. Không đổi cách đọc màu.
++ */
++var CE_FREE_COLOR_GROUP_NAMES_V1_ = {
++  trang:1, white:1, xam:1, gray:1, grey:1, cam:1, orange:1, vang:1, yellow:1, "do":1, red:1,
++  hong:1, pink:1, tim:1, purple:1, violet:1, xanh_la:1, xanhla:1, green:1,
++  xanh_duong:1, xanhduong:1, blue:1, xanh:1
++};
++var CE_FREE_COLOR_KEYS_V1_ = [
++  ['FREE_COLORS','MAU_TRONG','AVAILABLE_COLORS'],
++  ['FREE_COLOR_GROUPS','NHOM_MAU_TRONG','AVAILABLE_COLOR_GROUPS']
++];
++
++/** Trả danh sách vấn đề {code, key, value, message} của khai báo màu trống trong CONFIG LỊCH. */
++function ceFreeColorConfigIssuesV1_(rawConfig){
++  var issues=[];
++  var cfg={};
++  try{cfg=parseBookingSourceConfig(rawConfig||'')||{};}catch(e){return issues;}
++  CE_FREE_COLOR_KEYS_V1_.forEach(function(keys){
++    var used='';
++    keys.forEach(function(key){
++      var value=cfg[key];
++      if(value===undefined||value===null||String(value).trim()==='')return;
++      if(used){
++        issues.push({code:'FREE_COLOR_KEY_IGNORED',key:key,value:String(value),
++          message:key+'='+String(value)+' bị bỏ qua vì đã có '+used+' (chỉ khóa đầu tiên có tác dụng)'});
++        return;
++      }
++      used=key;
++      String(value).split(/[,|]+/).forEach(function(part){
++        var original=String(part||'').trim();
++        if(!original)return;
++        var name=ceNormalize_(original).replace(/[^a-z0-9#]+/g,'_').replace(/^_+|_+$/g,'');
++        if(name.indexOf('#')===0){
++          if(!/^#[0-9a-f]{6}$/.test(name)){
++            issues.push({code:'FREE_COLOR_HEX_INVALID',key:key,value:original,
++              message:'mã màu "'+original+'" không hợp lệ (cần đủ 6 ký tự, vd #ffff00) - đang không có tác dụng'});
++          }
++          return;
++        }
++        if(!CE_FREE_COLOR_GROUP_NAMES_V1_[name]){
++          issues.push({code:'FREE_COLOR_NAME_UNKNOWN',key:key,value:original,
++            message:'tên màu "'+original+'" ở '+key+' không được hỗ trợ - đang không có tác dụng (dùng: TRANG, XAM, CAM, VANG, DO, HONG, TIM, XANH_LA, XANH_DUONG hoặc mã #rrggbb)'});
++        }
++      });
++    });
++  });
++  return issues;
++}
+ function ceIsWhiteV34_(h){return !h||h==='#ffffff'||h==='#fff'||h==='white';}
+ function ceHexRgbV34_(h){var m=String(h||'').match(/^#?([0-9a-f]{6})$/i);if(!m)return null;return [parseInt(m[1].slice(0,2),16),parseInt(m[1].slice(2,4),16),parseInt(m[1].slice(4,6),16)];}
+-function ceHueBusyV34_(h){var x=ceHexRgbV34_(h);if(!x)return false;var r=x[0],g=x[1],b=x[2];return (r>180&&g<190&&b<190)||(r>180&&b>150&&g<120)||(r>190&&g>120&&g<230&&b<120);}
+ function ceParseColorListV34_(v){return String(v||'').split(/[,|]+/).map(function(x){return ceNormalize_(x);}).filter(Boolean);}
+ function ceBuildSourceLinkV34_(file,gid,col,row){return 'https://docs.google.com/spreadsheets/d/'+file.getId()+'/edit#gid='+gid+'&range='+ceColumnToLetterV33_(col+1)+(row+1);}
+ function ceColumnToLetterV33_(n){var s='';while(n>0){var r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s;}
+diff --git a/Config.js b/Config.js
+index 85ba69e..0455675 100644
+--- a/Config.js
++++ b/Config.js
+@@ -46,6 +46,9 @@ var BE_CONFIG = {
+   IMAGE_CACHE_CLEANUP_TO_TRASH: true,
+   STORAGE_MAINTENANCE_HANDLER: "runEhomeStorageMaintenanceV340",
+ 
++  // B7: autoResizeColumns MASTER_VILLA tốn vài giây mỗi build, chỉ để đẹp. Bật lại: true.
++  MASTER_AUTO_RESIZE_COLUMNS: false,
++
+   // MASTER có cấu hình riêng cho tên, lịch, ảnh và thông tin.
+   MASTER_HEADERS: [
+     "ID", "Thành phố", "Nguồn", "Link", "Enable",
+diff --git a/ConfigDoctor.js b/ConfigDoctor.js
+index 0ff9bf8..400ce9b 100644
+--- a/ConfigDoctor.js
++++ b/ConfigDoctor.js
+@@ -2,7 +2,7 @@
+ 
+ function opsConfigAllowedKeysV312_(block){
+   var common=["SHEET","LAYOUT","START_COL","END_COL","START_ROW","END_ROW","NAME_ROW","NAME_COL","NAME_SCAN_ROWS","SCAN_ROWS","SCAN_COLS","FALLBACK","FIXED_ROW","AUTO_ROW","TOP_ROWS","MIN_NAMES","MIN_NAMES_IN_ROW","START_COLUMN","END_COLUMN","COLUMN_START","COLUMN_END","ALLOW_FALLBACK","AUTO_FALLBACK","EXCLUDE_COLS","SKIP_COLS","FIXED_ROW_STRICT_COLUMN_FILTER","INFO_END_COL","DATA_END_COL","INFO_END_ROW","DATA_END_ROW"];
+-  if(block==="CALENDAR")return common.concat(["DATE_COL","DATE_COLUMN","DATE_ROW","DATE_ROWS","DATE_START_ROW","DATE_END_ROW","DATE_ORDER","CALENDAR_SHEET","GROUP_OPTIONS_B64","FREE_COLORS","MAU_TRONG","AVAILABLE_COLORS","FREE_COLOR_GROUPS","NHOM_MAU_TRONG","AVAILABLE_COLOR_GROUPS"]);
++  if(block==="CALENDAR")return common.concat(["DATE_COL","DATE_COLUMN","DATE_ROW","DATE_ROWS","DATE_START_ROW","DATE_END_ROW","DATE_ORDER","CALENDAR_SHEET","GROUP_OPTIONS_B64","FREE_COLORS","MAU_TRONG","AVAILABLE_COLORS","FREE_COLOR_GROUPS","NHOM_MAU_TRONG","AVAILABLE_COLOR_GROUPS","O_TRANG_KHONG_GIA","WHITE_NO_PRICE"]);
+   if(block==="IMAGE")return common.concat(["IMAGE_ROW","IMAGE_COL","IMAGE_SCAN_ROWS","IMAGE_ROWS","REQUIRE_IMAGE","IMAGE_ASSIGN_MODE","INFO_LAYOUT","METADATA_LAYOUT","INFO_START_ROW","INFO_START_COL","INFO_NAME_ROW","INFO_NAME_COL"]);
+   if(block==="INFO")return common.concat(["INFO_ROW","INFO_ROWS","INFO_COL","INFO_FROM_NAME_CELL","INFO_LAYOUT","METADATA_LAYOUT","INFO_SHEET","METADATA_SHEET","SHEET_INFO","INFO_HEADER_ROW","INFO_START_ROW","INFO_START_COL","INFO_NAME_ROW","INFO_NAME_COL","MAPS_ROW","MAPS_COL","MAP_ROW","MAP_COL","STANDARD_ROW","STANDARD_COL","BEDROOMS_ROW","BEDROOMS_COL","DESCRIPTION_ROW","DESCRIPTION_COL","DATA_START_ROW","DATA_START_COL"]);
+ 
+@@ -351,6 +351,13 @@ function opsValidateConfigBlockV4_(raw,block,context){
+     "Kiểm tra chính tả/key trước khi giữ config này.",{keys:unknown});
+ 
+   issues=issues.concat(opsValidateConfigSyntaxV4_(raw,block));
++  // Review 10/11 mục 2: tên/mã màu trống không hiểu được => trước đây bỏ qua im lặng.
++  if(block==="CALENDAR"&&typeof ceFreeColorConfigIssuesV1_==="function"){
++    ceFreeColorConfigIssuesV1_(raw).forEach(function(x){
++      opsV4Push_(issues,"WARNING",block,x.code,x.message,
++        "Sửa tên màu trong CONFIG LỊCH; nếu không, ô màu đó vẫn bị coi là BẬN.",{key:x.key,value:x.value});
++    });
++  }
+   return {raw:opsV4Text_(raw),parsed:opsV4Cfg_(raw),issues:issues};
+ }
+ 
+diff --git a/ConfigDoctorV41.js b/ConfigDoctorV41.js
+index 3321479..79075ed 100644
+--- a/ConfigDoctorV41.js
++++ b/ConfigDoctorV41.js
+@@ -29,10 +29,6 @@ function opsV41NowIso_(){
+   return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
+ }
+ 
+-function opsV41Clone_(obj){
+-  try { return JSON.parse(JSON.stringify(obj == null ? null : obj)); }
+-  catch(e){ return obj; }
+-}
+ 
+ function opsV41Issue_(level, code, message, evidence){
+   return {
+diff --git a/CustomerApi.js b/CustomerApi.js
+index 132b615..c791780 100644
+--- a/CustomerApi.js
++++ b/CustomerApi.js
+@@ -663,7 +663,6 @@ function ceCustomerDetectAmenitiesV61_(info){
+   });
+   return out;
+ }
+-function ceCustomerFeaturedMapV616_(){var raw=String(PropertiesService.getScriptProperties().getProperty("EHOME_CUSTOMER_FEATURED_IDS")||"");var out={};raw.split(/[\s,;|]+/).forEach(function(x){x=String(x||"").trim();if(x)out[x]=true;});return out;}
+ function ceCustomerRoomGroupIdV616_(v){var key=String(v&&v.calendarUrl||"")+"|"+String(v&&v.source||"");if(!key.replace(/\|/g,""))key=String(v&&v.id||"");try{var bytes=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,key,Utilities.Charset.UTF_8);var hex=bytes.map(function(b){var n=(b+256)%256;return ("0"+n.toString(16)).slice(-2);}).join("");return "RG-"+hex.slice(0,12);}catch(ignore){return "RG-"+String(v&&v.id||"").replace(/[^A-Za-z0-9_-]/g,"").slice(0,12);}}
+ function ceCustomerSanitizeInfoV61_(info){var text=String(info||"").replace(/https?:\/\/\S+/gi,"").replace(/(?:\+?84|0)\d[\d .-]{7,12}/g,"");text=text.replace(/\b(?:driver|host|chu\s*nha|chủ\s*nhà|nguon|nguồn|zalo|sdt|sđt|phone)\s*:\s*[^;|•✦*\n]+[;|•✦*]?/gi,"");var blocked=/\bgia\b|gia goc|gia nhan|thu ve|net\b|chiet khau|hoa hong|commission|host|chu nha|driver|nguon|google sheet|admin|\bsale\b|sale noi bo|noi bo|zalo|sdt|phone/i;return text.replace(/[•✦▪♦*]+/g,"\n").split(/\r?\n|\s+\|\s+/).map(function(x){return x.trim().replace(/^[;,:\-–—\s]+|[;,:\-–—\s]+$/g,"");}).filter(function(x){return x&&!blocked.test(ceNormalize_(x));}).slice(0,12).join("\n").slice(0,1200);}
+ function ceCustomerSanitizeVillaV61_(v,m,type,pricing,amenities){var min=Number(v.capacityMin||0),max=Number(v.capacityMax||0);return {villaId:String(v.villaId||""),name:String(v.name||""),city:String(v.city||""),image:String(v.image||""),productType:type,roomGroupId:type==="PHONG_RIENG"?String(m.roomGroupId||""):"",featured:false,standard:String(v.standard||""),capacityMin:min,capacityMax:max,capacityLabel:String(v.capacityLabel||v.standard||"Liên hệ"),bedrooms:String(v.bedrooms||m.bedrooms||""),info:ceCustomerSanitizeInfoV61_(v.info||""),amenities:amenities||[],available:v.available===true,priceStatus:pricing.totalPrice===null?"CONTACT":"KNOWN",totalPrice:pricing.totalPrice,totalPriceText:pricing.totalPriceText,averageNightPrice:pricing.averageNightPrice,averageNightPriceText:pricing.averageNightPriceText,nights:Number(v.nights||pricing.nightlyPrices.length||0),nightlyPrices:pricing.nightlyPrices};}
+diff --git a/GhostGuard.js b/GhostGuard.js
+new file mode 100644
+index 0000000..750d0dd
+--- /dev/null
++++ b/GhostGuard.js
+@@ -0,0 +1,426 @@
++/**
++ * GhostGuard.js - V2 (B1) CHỐNG CĂN ẢO TRONG NGUỒN ĐANG BẬT
++ *
++ * Vấn đề cũ:
++ *   Khi một căn biến mất khỏi nguồn đang Enable=TRUE, beAssessSourceReconcileV416_
++ *   chỉ cho gỡ căn khi Structure Snapshot xác nhận. Hai đường xác nhận đều hay tắc:
++ *   - V416 bắt parser AUTO phải ra đúng tập tên như CONFIG (FIXED_ROW lệch là tắc);
++ *   - V340 xóa cờ _structureConfirmed ngay khi baseline đã nhận danh sách mới.
++ *   => source bị khóa "giữ MASTER cũ" mãi, căn ảo tồn tại mãi, và cả source
++ *      cũng không nhận được căn mới.
++ *
++ * Quy tắc (đường xác nhận BỔ SUNG, guard cũ vẫn chạy trước):
++ *   1. Parser đọc ra >0 căn, không lỗi. Nguồn đọc 0 căn/lỗi đã có guard riêng
++ *      trong buildMasterVilla: giữ căn cũ.
++ *   2. Cùng một danh sách căn (fingerprint) phải được đọc ở 2 thời điểm CÁCH NHAU
++ *      ÍT NHẤT MIN_GAP_HOURS (mặc định 6 giờ, đổi bằng Script Property
++ *      BE_GHOST_MIN_GAP_HOURS). Các lần build dày trong khoảng đó không được tính thêm,
++ *      nên một lần đọc lỗi kéo dài vài phút không thể làm ẩn căn.
++ *      Nếu không thấy lại danh sách đó trong STALE_HOURS (72 giờ) thì đếm lại từ đầu.
++ *   3. Số căn giảm > 30% VÀ mất >= 2 căn trong 1 lần đọc: KHÔNG gỡ gì, báo Telegram
++ *      1 lần. Admin kiểm tra xong duyệt bằng ghostApproveSourceV1("<ID nguồn>").
++ *   4. Giới hạn tổng số căn bị gỡ trong một lần build (MAX_RETIRE_PER_RUN).
++ *   5. Mọi quyết định ghi vào tab GHOST_PREVIEW (ghi theo lô cuối build).
++ *   Căn bị gỡ khỏi MASTER_VILLA được RETIRE trong VILLA_IDENTITY_V1 (không xóa mã).
++ *   Căn quay lại được khôi phục đúng mã cũ (VillaIdentity: REVIVED_RETIRED_V1).
++ *
++ * Lưu trạng thái (review 10/11 mục 8): TOÀN BỘ nằm trong 1 Script Property
++ * BE_GHOST_STATE_V2 (JSON), tự dọn mục cũ, tối đa ~8 KB. Các khóa kiểu cũ
++ * BE_GHOST_READ_V1_* / BE_GHOST_ALERT_V1_* / BE_GHOST_APPROVE_V1_* được chuyển vào
++ * rồi xóa ở lần build đầu tiên. ghostStatusV1() cho biết số lượng.
++ *
++ * Hiệu năng: 1 lần đọc property mỗi build; ghi Properties/Sheet/Telegram gom lại ở
++ * beGhostFlushV1_() sau khi MASTER_VILLA publish thành công.
++ */
++
++var BE_GHOST_V1 = {
++  DISABLE_PROPERTY: "BE_GHOST_GUARD_V1_DISABLED", // đặt "TRUE" để tắt khẩn cấp
++  STATE_PROPERTY: "BE_GHOST_STATE_V2",
++  MIN_GAP_PROPERTY: "BE_GHOST_MIN_GAP_HOURS",
++  DEFAULT_MIN_GAP_HOURS: 6,
++  REQUIRED_READS: 2,
++  MAX_DROP_RATIO: 0.3,
++  // Quy tắc 30% chỉ áp dụng khi mất >= 2 căn trong 1 lần đọc. Nguồn nhỏ (2-3 căn)
++  // bỏ 1 căn là chuyện bình thường, vẫn phải qua 2 lần đọc cách nhau đủ giờ.
++  MIN_LOST_FOR_DROP_RULE: 2,
++  MAX_RETIRE_PER_RUN: 40,
++  STALE_HOURS: 72,
++  APPROVAL_DAYS: 7,
++  MAX_STATE_CHARS: 8000,
++  PREVIEW_SHEET: "GHOST_PREVIEW",
++  PREVIEW_MAX_ROWS: 1500,
++  LEGACY_PREFIXES: ["BE_GHOST_READ_V1_", "BE_GHOST_ALERT_V1_", "BE_GHOST_APPROVE_V1_"],
++  HEADERS: ["THỜI GIAN", "SOURCE ID", "NGUỒN", "SỐ CĂN TRƯỚC", "SỐ CĂN ĐỌC ĐƯỢC",
++            "CĂN SẼ ẨN / ĐÃ ẨN", "SỐ LẦN ĐỌC GIỐNG", "QUYẾT ĐỊNH", "LÝ DO"]
++};
++
++// Trạng thái của một lần build. buildMasterVilla gọi beGhostBeginRunV1_() mỗi lần build.
++var BE_GHOST_RUN_V1 = null;
++
++function beGhostBeginRunV1_() {
++  BE_GHOST_RUN_V1 = {loaded: false, state: {}, dirty: false, legacyKeys: [], preview: [], alerts: [], used: 0, minGapHours: null};
++  return BE_GHOST_RUN_V1;
++}
++
++function beGhostMinGapHoursV1_(props) {
++  var raw = "";
++  try { raw = String((props || PropertiesService.getScriptProperties()).getProperty(BE_GHOST_V1.MIN_GAP_PROPERTY) || "").trim(); } catch (e) {}
++  var n = Number(raw);
++  return raw !== "" && isFinite(n) && n >= 0 ? n : BE_GHOST_V1.DEFAULT_MIN_GAP_HOURS;
++}
++
++/** Đọc trạng thái (1 property) + chuyển khóa kiểu cũ. Thuần với tham số props để test. */
++function beGhostLoadStateV1_(props) {
++  var state = {};
++  try { state = JSON.parse(props.getProperty(BE_GHOST_V1.STATE_PROPERTY) || "{}") || {}; } catch (e) { state = {}; }
++  if (!state || typeof state !== "object" || Array.isArray(state)) state = {};
++  var legacy = [];
++  try {
++    (props.getKeys() || []).forEach(function(k) {
++      BE_GHOST_V1.LEGACY_PREFIXES.forEach(function(prefix) {
++        if (String(k).indexOf(prefix) !== 0) return;
++        legacy.push(k);
++        var skey = String(k).slice(prefix.length);
++        var entry = state[skey] = state[skey] || {};
++        var value = props.getProperty(k);
++        if (prefix === "BE_GHOST_READ_V1_") {
++          try { var o = JSON.parse(value || "{}"); if (o && o.fp && !entry.fp) { entry.fp = o.fp; entry.r = Number(o.reads || 1); entry.c = Number(o.at || 0); entry.a = Number(o.at || 0); } } catch (ignore) {}
++        } else if (prefix === "BE_GHOST_ALERT_V1_") {
++          if (value && !entry.al) entry.al = value;
++        } else if (value === "TRUE" && !entry.ap) {
++          entry.ap = new Date().getTime();
++        }
++      });
++    });
++  } catch (ignoreKeys) {}
++  return {state: state, legacyKeys: legacy};
++}
++
++function beGhostRunV1_() {
++  if (!BE_GHOST_RUN_V1) beGhostBeginRunV1_();
++  var run = BE_GHOST_RUN_V1;
++  if (!run.loaded) {
++    run.loaded = true;
++    try {
++      var props = PropertiesService.getScriptProperties();
++      var loaded = beGhostLoadStateV1_(props);
++      run.state = loaded.state;
++      run.legacyKeys = loaded.legacyKeys;
++      if (run.legacyKeys.length) run.dirty = true;
++      run.minGapHours = beGhostMinGapHoursV1_(props);
++    } catch (e) {
++      run.state = {};
++      run.minGapHours = BE_GHOST_V1.DEFAULT_MIN_GAP_HOURS;
++    }
++  }
++  return run;
++}
++
++/** Dọn mục hết hạn và giới hạn kích thước. Thuần, test được. */
++function beGhostPruneStateV1_(state, nowMs) {
++  var staleMs = BE_GHOST_V1.STALE_HOURS * 3600000;
++  var approvalMs = BE_GHOST_V1.APPROVAL_DAYS * 86400000;
++  var removed = 0;
++  Object.keys(state || {}).forEach(function(k) {
++    var e = state[k] || {};
++    if (e.ap && nowMs - Number(e.ap) > approvalMs) { delete e.ap; }
++    var seen = Math.max(Number(e.a || 0), Number(e.c || 0));
++    var hasRead = !!e.fp && seen > 0 && nowMs - seen <= staleMs;
++    if (!hasRead) { delete e.fp; delete e.r; delete e.c; delete e.a; }
++    // Cảnh báo giữ 30 ngày để không báo lại cùng một tình trạng.
++    if (e.al && e.alAt && nowMs - Number(e.alAt) > 30 * 86400000) { delete e.al; delete e.alAt; }
++    if (!e.fp && !e.ap && !e.al) { delete state[k]; removed++; }
++  });
++  // Giới hạn kích thước: bỏ mục ít gặp gần đây nhất trước.
++  var keys = Object.keys(state);
++  while (JSON.stringify(state).length > BE_GHOST_V1.MAX_STATE_CHARS && keys.length) {
++    keys.sort(function(a, b) { return Number(state[a].a || state[a].alAt || 0) - Number(state[b].a || state[b].alAt || 0); });
++    delete state[keys.shift()];
++    removed++;
++  }
++  return removed;
++}
++
++function beGhostGuardDisabledV1_() {
++  try {
++    return PropertiesService.getScriptProperties()
++      .getProperty(BE_GHOST_V1.DISABLE_PROPERTY) === "TRUE";
++  } catch (e) { return false; }
++}
++
++function beGhostFingerprintV1_(currentSet, currentCount) {
++  var names = Object.keys(currentSet || {}).sort();
++  var raw = String(currentCount) + "::" + names.join("|");
++  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw, Utilities.Charset.UTF_8);
++  return bytes.map(function(b) { var v = b < 0 ? b + 256 : b; return ("0" + v.toString(16)).slice(-2); }).join("").slice(0, 16);
++}
++
++function beGhostSourceKeyV1_(sourceId, source) {
++  var id = String(sourceId || "").trim();
++  if (id) return "ID_" + id.replace(/[^A-Za-z0-9_-]/g, "_");
++  return "SRC_" + normalizeMasterText(source || "").replace(/[^a-z0-9]+/g, "_").slice(0, 60);
++}
++
++/**
++ * Quyết định thuần (không I/O) để test được.
++ * input: previousCount, currentCount, missingNames, fingerprint,
++ *        state {fp, reads, countedAt, at}, nowMs, budgetLeft, approved, minGapHours.
++ */
++function beGhostDecideV1_(input) {
++  var prevCount = Number(input.previousCount || 0);
++  var curCount = Number(input.currentCount || 0);
++  var missing = input.missingNames || [];
++  var state = input.state || {};
++  var nowMs = Number(input.nowMs || new Date().getTime());
++  var gapMs = Number(input.minGapHours == null ? BE_GHOST_V1.DEFAULT_MIN_GAP_HOURS : input.minGapHours) * 3600000;
++  var budgetLeft = Number(input.budgetLeft == null ? BE_GHOST_V1.MAX_RETIRE_PER_RUN : input.budgetLeft);
++
++  if (curCount <= 0) {
++    return {allow: false, reason: "ZERO_OR_ERROR_KEEP_OLD", reads: 0, newState: null};
++  }
++
++  var lastSeen = Number(state.at || 0);
++  var fresh = lastSeen > 0 && (nowMs - lastSeen) <= BE_GHOST_V1.STALE_HOURS * 3600000;
++  var reads, countedAt, gapWait = false;
++  if (state.fp === input.fingerprint && fresh) {
++    var lastCounted = Number(state.countedAt || lastSeen);
++    if (nowMs - lastCounted >= gapMs) { reads = Number(state.reads || 1) + 1; countedAt = nowMs; }
++    else { reads = Number(state.reads || 1); countedAt = lastCounted; gapWait = true; }
++  } else {
++    reads = 1; countedAt = nowMs;
++  }
++  var newState = {fp: input.fingerprint, reads: reads, countedAt: countedAt, at: nowMs};
++  var lost = prevCount - curCount;
++  var drop = prevCount > 0 ? lost / prevCount : 0;
++
++  if (lost >= BE_GHOST_V1.MIN_LOST_FOR_DROP_RULE && drop > BE_GHOST_V1.MAX_DROP_RATIO + 1e-9 && input.approved !== true) {
++    return {allow: false, reason: "DROP_OVER_30_PERCENT", reads: reads, alert: true, drop: drop, newState: newState};
++  }
++  if (reads < BE_GHOST_V1.REQUIRED_READS) {
++    return {allow: false, reason: gapWait ? "WAIT_MIN_GAP_HOURS" : "WAIT_SECOND_READ", reads: reads, newState: newState,
++      readyAt: countedAt + gapMs};
++  }
++  if (missing.length > budgetLeft) {
++    return {allow: false, reason: "RUN_BUDGET_EXCEEDED", reads: reads, newState: newState};
++  }
++  return {allow: true, reason: input.approved === true ? "ADMIN_APPROVED_STABLE_READS" : "GHOST_STABLE_READS",
++          reads: reads, newState: null, consumeApproval: input.approved === true};
++}
++
++/**
++ * Gọi từ beAssessSourceReconcileV416_ khi guard cũ chặn việc gỡ căn.
++ * Trả {reads} nếu cho phép gỡ, null nếu chưa.
++ */
++function beGhostStableReadConfirmV1_(options, currentSet, previousCount, currentCount, missingNames) {
++  if (beGhostGuardDisabledV1_()) return null;
++  options = options || {};
++  var run = beGhostRunV1_();
++  var skey = beGhostSourceKeyV1_(options.sourceId, options.source);
++  var entry = run.state[skey] || {};
++  var nowMs = new Date().getTime();
++  var fp = beGhostFingerprintV1_(currentSet, currentCount);
++
++  var d = beGhostDecideV1_({
++    previousCount: previousCount, currentCount: currentCount, missingNames: missingNames,
++    fingerprint: fp, state: {fp: entry.fp, reads: entry.r, countedAt: entry.c, at: entry.a}, nowMs: nowMs,
++    budgetLeft: BE_GHOST_V1.MAX_RETIRE_PER_RUN - run.used, approved: !!entry.ap,
++    minGapHours: run.minGapHours
++  });
++
++  if (d.newState) { entry.fp = d.newState.fp; entry.r = d.newState.reads; entry.c = d.newState.countedAt; entry.a = d.newState.at; }
++  else { delete entry.fp; delete entry.r; delete entry.c; delete entry.a; }
++  if (d.allow) run.used += (missingNames || []).length;
++  if (d.consumeApproval) delete entry.ap;
++  if (d.alert && entry.al !== fp) {
++    entry.al = fp; entry.alAt = nowMs;
++    run.alerts.push({sourceId: String(options.sourceId || ""), source: String(options.source || ""),
++      previousCount: previousCount, currentCount: currentCount, missing: (missingNames || []).slice(0, 15)});
++  }
++  run.state[skey] = entry;
++  run.dirty = true;
++
++  var label = d.allow ? "ẨN (RETIRED)" : (d.alert ? "CHẶN - CHỜ ADMIN DUYỆT" : "CHỜ LẦN ĐỌC SAU");
++  var reasonText = d.reason;
++  if (d.reason === "WAIT_MIN_GAP_HOURS" || d.reason === "WAIT_SECOND_READ") {
++    reasonText += " (đọc lại sau " + (typeof aiFormatTimeV1_ === "function" ? aiFormatTimeV1_(d.readyAt) : new Date(d.readyAt).toISOString()) + ")";
++  }
++  run.preview.push([new Date(), String(options.sourceId || ""), String(options.source || ""),
++    previousCount, currentCount, (missingNames || []).join(" | ").slice(0, 45000), d.reads, label, reasonText]);
++
++  Logger.log(JSON.stringify({
++    code: "GHOST_GUARD_V2", sourceId: String(options.sourceId || ""), source: String(options.source || ""),
++    previousCount: previousCount, currentCount: currentCount, missing: missingNames,
++    reads: d.reads, allow: d.allow, reason: d.reason, minGapHours: run.minGapHours
++  }));
++  return d.allow ? {reads: d.reads} : null;
++}
++
++/** Gọi 1 lần cuối buildMasterVilla, sau khi MASTER_VILLA đã publish thành công. */
++function beGhostFlushV1_() {
++  var run = BE_GHOST_RUN_V1;
++  if (!run) return {success: true, changed: false};
++  var out = {success: true, entries: 0, pruned: 0, legacyDeleted: 0, preview: run.preview.length, alerts: run.alerts.length};
++  try {
++    var props = PropertiesService.getScriptProperties();
++    if (run.loaded && run.dirty) {
++      out.pruned = beGhostPruneStateV1_(run.state, new Date().getTime());
++      out.entries = Object.keys(run.state).length;
++      if (out.entries) props.setProperty(BE_GHOST_V1.STATE_PROPERTY, JSON.stringify(run.state));
++      else props.deleteProperty(BE_GHOST_V1.STATE_PROPERTY);
++      run.legacyKeys.forEach(function(k) { try { props.deleteProperty(k); out.legacyDeleted++; } catch (ignore) {} });
++    }
++  } catch (e) {
++    out.success = false;
++    out.propsError = String(e && e.message || e);
++  }
++  if (run.preview.length) {
++    try { beGhostWritePreviewV1_(run.preview); }
++    catch (e2) { out.previewError = String(e2 && e2.message || e2); }
++  }
++  run.alerts.forEach(function(a) { beGhostSendAlertV1_(a); });
++  Logger.log(JSON.stringify({code: "GHOST_GUARD_FLUSH_V2", result: out}));
++  BE_GHOST_RUN_V1 = null;
++  return out;
++}
++
++function beGhostWritePreviewV1_(rows) {
++  var ss = SpreadsheetApp.getActiveSpreadsheet();
++  var sh = ss.getSheetByName(BE_GHOST_V1.PREVIEW_SHEET);
++  var width = BE_GHOST_V1.HEADERS.length;
++  if (!sh) {
++    sh = ss.insertSheet(BE_GHOST_V1.PREVIEW_SHEET);
++    sh.getRange(1, 1, 1, width).setValues([BE_GHOST_V1.HEADERS]);
++    sh.setFrozenRows(1);
++  }
++  // Mới nhất nằm trên cùng.
++  sh.insertRowsBefore(2, rows.length);
++  sh.getRange(2, 1, rows.length, width).setValues(rows);
++  var extra = sh.getLastRow() - 1 - BE_GHOST_V1.PREVIEW_MAX_ROWS;
++  if (extra > 0) sh.deleteRows(BE_GHOST_V1.PREVIEW_MAX_ROWS + 2, extra);
++}
++
++function beGhostSendAlertV1_(a) {
++  try {
++    if (typeof sendTelegramMessageV31_ !== "function" || typeof tgPropertyV315_ !== "function") return;
++    var chat = tgPropertyV315_("TELEGRAM_ADMIN_CHAT_ID");
++    if (!chat) return;
++    sendTelegramMessageV31_(chat,
++      "⚠️ Nguồn \"" + a.source + "\" (ID " + (a.sourceId || "?") + ") giảm số căn bất thường: " +
++      a.previousCount + " → " + a.currentCount + ".\n" +
++      "Căn không còn thấy: " + (a.missing.join(", ") || "-") + "\n" +
++      "Hệ thống KHÔNG ẩn căn nào và giữ MASTER cũ.\n" +
++      "Nếu đúng là nguồn đã bỏ các căn này: chạy ghostApproveSourceV1(\"" + a.sourceId + "\") trong Apps Script; " +
++      "các căn sẽ được ẩn sau 2 lần đọc giống nhau (mã căn vẫn được giữ).");
++  } catch (e) {
++    Logger.log(JSON.stringify({level: "WARNING", code: "GHOST_ALERT_FAILED_V1", error: String(e && e.message || e)}));
++  }
++}
++
++/** Đọc-sửa-ghi trạng thái ngoài lúc build (có khóa). */
++function beGhostMutateStateV1_(fn) {
++  var lock = LockService.getScriptLock();
++  var locked = false;
++  try { locked = lock.tryLock(20000); } catch (ignore) {}
++  try {
++    var props = PropertiesService.getScriptProperties();
++    var loaded = beGhostLoadStateV1_(props);
++    var result = fn(loaded.state);
++    beGhostPruneStateV1_(loaded.state, new Date().getTime());
++    if (Object.keys(loaded.state).length) props.setProperty(BE_GHOST_V1.STATE_PROPERTY, JSON.stringify(loaded.state));
++    else props.deleteProperty(BE_GHOST_V1.STATE_PROPERTY);
++    loaded.legacyKeys.forEach(function(k) { try { props.deleteProperty(k); } catch (ignore2) {} });
++    return result;
++  } finally {
++    if (locked) { try { lock.releaseLock(); } catch (ignore3) {} }
++  }
++}
++
++/** Admin duyệt cho một nguồn giảm >30% số căn được ẩn căn (dùng 1 lần, hết hạn sau 7 ngày). */
++function ghostApproveSourceV1(sourceId) {
++  var id = String(sourceId || "").trim();
++  if (!id) throw new Error("Cần truyền ID nguồn trong MASTER, ví dụ ghostApproveSourceV1(\"117\")");
++  var skey = beGhostSourceKeyV1_(id, "");
++  beGhostMutateStateV1_(function(state) {
++    var e = state[skey] = state[skey] || {};
++    e.ap = new Date().getTime();
++  });
++  var result = {success: true, code: "GHOST_SOURCE_APPROVED_V2", sourceId: id,
++    note: "Các căn biến mất của nguồn này sẽ được ẩn sau 2 lần đọc giống nhau cách nhau đủ " +
++      beGhostMinGapHoursV1_() + " giờ. Duyệt hết hạn sau " + BE_GHOST_V1.APPROVAL_DAYS + " ngày."};
++  Logger.log(JSON.stringify(result));
++  return result;
++}
++
++/** Xem trạng thái chờ hiện tại (không thay đổi gì) + số Script Property đang dùng. */
++function ghostStatusV1() {
++  var props = PropertiesService.getScriptProperties();
++  var keys = props.getKeys() || [];
++  var raw = props.getProperty(BE_GHOST_V1.STATE_PROPERTY) || "{}";
++  var state = {};
++  try { state = JSON.parse(raw) || {}; } catch (e) { state = {}; }
++  var legacy = keys.filter(function(k) {
++    return BE_GHOST_V1.LEGACY_PREFIXES.some(function(p) { return String(k).indexOf(p) === 0; });
++  });
++  var fmt = function(ms) { return ms ? (typeof aiFormatTimeV1_ === "function" ? aiFormatTimeV1_(ms) : new Date(Number(ms)).toISOString()) : ""; };
++  var result = {
++    success: true, code: "GHOST_STATUS_V2",
++    scriptPropertiesTotal: keys.length,
++    ghostStateBytes: raw.length, ghostStateMaxBytes: BE_GHOST_V1.MAX_STATE_CHARS,
++    legacyGhostKeys: legacy.length,
++    minGapHours: beGhostMinGapHoursV1_(props),
++    sources: Object.keys(state).sort().map(function(k) {
++      var e = state[k] || {};
++      return {source: k, reads: Number(e.r || 0), lastCounted: fmt(e.c), lastSeen: fmt(e.a),
++        approved: !!e.ap, alerted: !!e.al};
++    })
++  };
++  Logger.log(JSON.stringify(result, null, 2));
++  return result;
++}
++
++/** Test thuần (không đụng sheet). Chạy trong Apps Script: testGhostGuardV1() */
++function testGhostGuardV1() {
++  var now = 1800000000000, hour = 3600000;
++  function d(o) {
++    var base = {previousCount: 5, currentCount: 4, missingNames: ["a"], fingerprint: "X", state: {}, nowMs: now, minGapHours: 6};
++    Object.keys(o).forEach(function(k) { base[k] = o[k]; });
++    return beGhostDecideV1_(base);
++  }
++  var cases = [
++    ["lần đọc đầu phải chờ", d({}).reason, "WAIT_SECOND_READ"],
++    ["lần 2 cách 7 giờ, giống nhau => ẩn", d({state: {fp: "X", reads: 1, countedAt: now - 7 * hour, at: now - 7 * hour}}).allow, true],
++    ["lần 2 chỉ cách 10 phút => KHÔNG ẩn", d({state: {fp: "X", reads: 1, countedAt: now - hour / 6, at: now - hour / 6}}).reason, "WAIT_MIN_GAP_HOURS"],
++    ["nhiều lần build dày trong 6 giờ vẫn chỉ tính 1 lần đọc", d({state: {fp: "X", reads: 1, countedAt: now - 5 * hour, at: now - hour / 6}}).reads, 1],
++    ["khoảng cách cấu hình 0 giờ => như cũ", d({minGapHours: 0, state: {fp: "X", reads: 1, countedAt: now - 60000, at: now - 60000}}).allow, true],
++    ["lần 2 khác danh sách => đếm lại từ 1", d({fingerprint: "Y", state: {fp: "X", reads: 1, countedAt: now - 7 * hour, at: now - 7 * hour}}).reads, 1],
++    ["không thấy lại quá 72 giờ => đếm lại", d({state: {fp: "X", reads: 1, countedAt: now - 80 * hour, at: now - 80 * hour}}).reads, 1],
++    ["giảm >30% => chặn", d({previousCount: 10, currentCount: 6, missingNames: ["a", "b", "c", "d"], state: {fp: "X", reads: 5, countedAt: now - 7 * hour, at: now - hour}}).reason, "DROP_OVER_30_PERCENT"],
++    ["giảm >30% đã duyệt + đọc đủ => ẩn", d({previousCount: 10, currentCount: 6, approved: true, state: {fp: "X", reads: 1, countedAt: now - 7 * hour, at: now - 7 * hour}}).allow, true],
++    ["giảm >30% đã duyệt nhưng mới đọc 1 lần => chờ", d({previousCount: 10, currentCount: 6, approved: true}).reason, "WAIT_SECOND_READ"],
++    ["nguồn 3 căn mất 1 (33%) => không coi là bất thường", d({previousCount: 3, currentCount: 2, state: {fp: "X", reads: 1, countedAt: now - 7 * hour, at: now - 7 * hour}}).allow, true],
++    ["nguồn 3 căn mất 2 => chặn", d({previousCount: 3, currentCount: 1, missingNames: ["a", "b"], state: {fp: "X", reads: 1, countedAt: now - 7 * hour, at: now}}).reason, "DROP_OVER_30_PERCENT"],
++    ["0 căn => giữ cũ", d({currentCount: 0, missingNames: [], state: {fp: "X", reads: 3, countedAt: now - 7 * hour, at: now}}).allow, false],
++    ["hết ngân sách => chờ", d({missingNames: ["a", "b"], state: {fp: "X", reads: 1, countedAt: now - 7 * hour, at: now - 7 * hour}, budgetLeft: 1}).reason, "RUN_BUDGET_EXCEEDED"]
++  ];
++  cases.forEach(function(c) { if (c[1] !== c[2]) throw new Error("GHOST_GUARD_TEST_FAIL: " + c[0] + " got=" + c[1]); });
++
++  // Dọn trạng thái: mục cũ hơn 72 giờ bị bỏ, duyệt hết hạn sau 7 ngày, giữ giới hạn kích thước.
++  var st = {A: {fp: "X", r: 1, c: now - 80 * hour, a: now - 80 * hour}, B: {fp: "Y", r: 1, c: now - hour, a: now - hour},
++    C: {ap: now - 8 * 86400000}, D: {ap: now - 86400000}};
++  beGhostPruneStateV1_(st, now);
++  if (st.A || !st.B || st.C || !st.D) throw new Error("GHOST_GUARD_TEST_FAIL: dọn trạng thái sai " + JSON.stringify(st));
++  var big = {};
++  for (var i = 0; i < 400; i++) big["ID_" + i] = {fp: "abcdef0123456789", r: 1, c: now - i * 1000, a: now - i * 1000};
++  beGhostPruneStateV1_(big, now);
++  if (JSON.stringify(big).length > BE_GHOST_V1.MAX_STATE_CHARS || !big.ID_0) throw new Error("GHOST_GUARD_TEST_FAIL: giới hạn kích thước sai");
++
++  // Chuyển khóa kiểu cũ vào 1 property.
++  var store = {"BE_GHOST_READ_V1_ID_9": JSON.stringify({fp: "Z", reads: 1, at: now}), "BE_GHOST_APPROVE_V1_ID_9": "TRUE", "OTHER": "x"};
++  var fake = {getProperty: function(k) { return store[k] === undefined ? null : store[k]; }, getKeys: function() { return Object.keys(store); }};
++  var loaded = beGhostLoadStateV1_(fake);
++  if (loaded.legacyKeys.length !== 2 || loaded.state.ID_9.fp !== "Z" || !loaded.state.ID_9.ap) throw new Error("GHOST_GUARD_TEST_FAIL: chuyển khóa cũ sai");
++
++  var result = {success: true, code: "GHOST_GUARD_TEST_PASS_V2", cases: cases.length + 3};
++  Logger.log(JSON.stringify(result));
++  return result;
++}
+diff --git a/HiddenColumnHandler.js b/HiddenColumnHandler.js
+index 2095e77..6943792 100644
+--- a/HiddenColumnHandler.js
++++ b/HiddenColumnHandler.js
+@@ -53,7 +53,9 @@ function hcRelevantTabsV2_(file) {
+       var name = sh.getName();
+       var month = typeof ceSheetMonthV50_ === "function" ? Number(ceSheetMonthV50_(name) || 0) : 0;
+       if (!(month >= 1 && month <= 12)) continue;
+-      var year = typeof ceSheetYearV50_ === "function" ? Number(ceSheetYearV50_(name, nowYear) || nowYear) : nowYear;
++      var year = typeof ceSheetYearForDateB5_ === "function"
++        ? Number(ceSheetYearForDateB5_(name, month, new Date()) || nowYear)
++        : (typeof ceSheetYearV50_ === "function" ? Number(ceSheetYearV50_(name, nowYear) || nowYear) : nowYear);
+       if (year * 12 + (month - 1) < nowIndex) continue;
+       tabs.push({ sheet: sh, name: name });
+     }
+diff --git a/ImageAudit.js b/ImageAudit.js
+index 08fa984..376253d 100644
+--- a/ImageAudit.js
++++ b/ImageAudit.js
+@@ -92,7 +92,6 @@ function verifyImageAuditUrlsV342(limit){
+ function runImageAuditV30(){return runImageAuditV342();}
+ function getImageAuditSummaryV30(){return getImageAuditSummaryV342();}
+ function verifyImageAuditUrlsV30(limit){return verifyImageAuditUrlsV342(limit);}
+-function beImageAuditQueueMapV30_(ss){return beImageAuditQueueMapV342_(ss);}
+ 
+ function testImageAuditV342(){
+   var reasons=[beImageAuditErrorReasonV342_("Nguồn không còn ảnh tại vị trí đã map."),beImageAuditErrorReasonV342_("Không lấy được URL/Blob/XLSX của ảnh."),beImageAuditErrorReasonV342_("Không map được ảnh theo tên/cột nguồn.")];
+diff --git a/ImageDriveCache.js b/ImageDriveCache.js
+index b368d55..0d51d58 100644
+--- a/ImageDriveCache.js
++++ b/ImageDriveCache.js
+@@ -668,10 +668,6 @@ function beExportSpreadsheetXlsxFilesV17_(spreadsheetId) {
+   return {files:files,method:fetched.method};
+ }
+ 
+-/** Giữ tên cũ cho code khác nếu có gọi trực tiếp. */
+-function beExportSpreadsheetXlsxFilesV14_(spreadsheetId) {
+-  return beExportSpreadsheetXlsxFilesV17_(spreadsheetId).files;
+-}
+ 
+ /** Public self-test, không gọi mạng. */
+ function testImageDriveCacheV17() {
+diff --git a/Index.html b/Index.html
+index 9b62518..618bc74 100644
+--- a/Index.html
++++ b/Index.html
+@@ -1651,6 +1651,7 @@
+       if(r==="DEADLINE_EXCEEDED")return "⏱ Đọc lịch quá lâu – thử lại sau ít phút";
+       if(r==="SOURCE_READ_FAILED")return "⚠️ File lịch của nguồn đọc không được – báo admin";
+       if(r==="NO_CALENDAR_ACTIVITY")return "📅 Lịch chưa có dữ liệu ngày này – hỏi chủ nhà";
++      if(r==="WHITE_NO_PRICE_B6"||r==="SNAPSHOT_WHITE_NO_PRICE_B6")return "💬 Ô lịch để trắng nhưng chưa có giá – hỏi chủ nhà trước khi chốt";
+       if(r==="LIVE_READ_FAILED"||r==="SNAPSHOT_UNKNOWN_STATE")return "⚠️ Chưa đọc được lịch (tab tháng hoặc file có thể lỗi) – thử lại, vẫn lỗi thì báo admin";
+       if(r)return "⚠️ Đọc lịch chưa được ("+r+")";
+       return "⏳ Cần kiểm tra lịch / giá";
+diff --git a/MasterEngine.js b/MasterEngine.js
+index 2564ba4..1091ca8 100644
+--- a/MasterEngine.js
++++ b/MasterEngine.js
+@@ -98,161 +98,6 @@ function beShouldRefreshImageSourceV4224_(imageSource) {
+   return beIsDriveFolderImageSourceV4224_(imageSource);
+ }
+ 
+-/* ================= END V2.1 FAST MASTER RUNTIME CACHE ================= */
+-
+-/**
+- * MASTER VILLA V5 - SIMPLE BLACKLIST
+- * Base: V3 FIXED_RANGE
+- * - Giữ cơ chế nhận diện/chấm điểm V3
+- * - FIXED_ROW vẫn phải đạt MIN_SCORE, tránh đọc dư
+- * - Blacklist ngắn, có bắt biến thể gần giống
+- * - Hỗ trợ Config: MIN_SCORE=18
+- */
+-
+-function buildMasterVillaLegacy_() {
+-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+-  const master = ss.getSheetByName("MASTER");
+-  let output = ss.getSheetByName("MASTER_VILLA");
+-
+-  if (!master) {
+-    throw new Error('Không tìm thấy sheet "MASTER"');
+-  }
+-
+-  if (!output) {
+-    output = ss.insertSheet("MASTER_VILLA");
+-  }
+-
+-  output.clearContents();
+-
+-  const headers = [
+-    "MÃ CĂN",
+-    "ẢNH",
+-    "TÊN CĂN",
+-    "THÀNH PHỐ",
+-    "NGUỒN",
+-    "LINK LỊCH",
+-    "TIÊU CHUẨN",
+-    "PN",
+-    "THÔNG TIN",
+-    "MAPS",
+-    "CẬP NHẬT"
+-  ];
+-
+-  output.getRange(1, 1, 1, headers.length).setValues([headers]);
+-
+-  const masterRows = master.getDataRange().getValues();
+-  const result = [];
+-
+-  for (let i = 1; i < masterRows.length; i++) {
+-    const sourceID = masterRows[i][0];
+-    const city = cleanMasterText(masterRows[i][1]);
+-    const source = cleanMasterText(masterRows[i][2]);
+-    const link = cleanMasterText(masterRows[i][3]);
+-    const enable = masterRows[i][4];
+-    const config = cleanMasterText(masterRows[i][5]);
+-
+-    if (enable !== true || !link) continue;
+-
+-    try {
+-      const sourceFile = beOpenSourceSpreadsheetV_FIX(link);  // FIX: hỗ trợ nguồn .xlsx
+-
+-      const infoSheet = findMasterInfoSheet(sourceFile);
+-      const infoVillas = infoSheet
+-        ? readMasterFromInfoSheet(infoSheet, config)
+-        : [];
+-
+-      const calendarSheet = findLatestMasterCalendarSheet(sourceFile);
+-      const calendarVillas = calendarSheet
+-        ? readMasterFromCalendarSheet(calendarSheet, config)
+-        : [];
+-
+-      let villas = [];
+-
+-      /*
+-       * Sheet lịch là nguồn quyết định danh sách căn.
+-       * Sheet thông tin chỉ bổ sung metadata cho đúng tên tương ứng.
+-       */
+-      if (calendarVillas.length > 0) {
+-        const infoMap = {};
+-
+-        infoVillas.forEach(function(villa) {
+-          const key = normalizeMasterText(villa.name);
+-          if (key && !infoMap[key]) {
+-            infoMap[key] = villa;
+-          }
+-        });
+-
+-        villas = calendarVillas.map(function(villa) {
+-          const key = normalizeMasterText(villa.name);
+-          const info = infoMap[key] || {};
+-
+-          return {
+-            name: villa.name,
+-            standard: info.standard || villa.standard || "",
+-            bedrooms: info.bedrooms || villa.bedrooms || "",
+-            info: info.info || villa.info || "",
+-            image: info.image || villa.image || "",
+-            maps: info.maps || villa.maps || ""
+-          };
+-        });
+-      } else {
+-        /*
+-         * Giữ tương thích nguồn chưa có sheet lịch đọc được.
+-         */
+-        villas = infoVillas;
+-      }
+-
+-      villas = removeDuplicateMasterVillas(villas);
+-
+-      for (const villa of villas) {
+-        if (!villa.name) continue;
+-
+-        result.push([
+-          createVillaSku(sourceID, villa.name),
+-          villa.image || "",
+-          villa.name || "",
+-          city || "",
+-          source || "",
+-          link || "",
+-          villa.standard || "",
+-          villa.bedrooms || "",
+-          villa.info || "",
+-          villa.maps || "",
+-          new Date()
+-        ]);
+-      }
+-       } catch (error) {
+-      
+-    }
+-  }
+-
+-  // ===== DEBUG MASTER_VILLA =====
+-  Logger.log("================================");
+-  Logger.log("TỔNG SỐ CĂN ĐỌC ĐƯỢC: " + result.length);
+-
+-  const uniqueNames = new Set(
+-    result
+-      .map(function(row) {
+-        // Cột TÊN CĂN là vị trí số 3 trên sheet,
+-        // nhưng trong mảng result là index 2
+-        return normalizeMasterText(row[2]);
+-      })
+-      .filter(String)
+-  );
+-
+-  Logger.log("TỔNG TÊN CĂN DUY NHẤT: " + uniqueNames.size);
+-  Logger.log("================================");
+-
+-  if (result.length > 0) {
+-    output
+-      .getRange(2, 1, result.length, headers.length)
+-      .setValues(result);
+-  }
+-
+-  output.setFrozenRows(1);
+-  output.autoResizeColumns(1, headers.length);
+-}
+-
+ 
+ /**
+  * Chỉ trả về các tab đang hiển thị. Mọi bộ dò AUTO đều phải dùng hàm này.
+@@ -706,7 +551,11 @@ function expandMasterMergedCells(sheet, values, formulas, cachedMergedRangesV21)
+  * NAME_MODE=FIXED_ROW;NAME_ROW=4
+  * START_COL=3;TOP_ROWS=12;FALLBACK=TRUE
+  */
++// B3: cảnh báo của lần đọc layout gần nhất (buildMasterVilla lấy ra sau mỗi nguồn).
++var BE_B3_LAST_WARNINGS_V1 = [];
++
+ function readMasterFromColumnLayout(values, formulas, rawConfig) {
++  BE_B3_LAST_WARNINGS_V1 = [];
+   if (!values || !values.length || !values[0]) return [];
+ 
+   const config = parseMasterColumnConfig(rawConfig);
+@@ -796,6 +645,21 @@ Logger.log(JSON.stringify(config));
+       isVillaColumn: !!name
+     });
+   }
++  // B3: cột trong vùng cấu hình có giá ở các hàng ngày nhưng hàng tên trống => cảnh báo,
++  // không còn bỏ qua im lặng (Kimi H/O, thảo anh D/F).
++  try {
++    BE_B3_LAST_WARNINGS_V1 = beFindNamelessPriceColumnsB3_(values, config, nameDetection, columns, lastColumnExclusive);
++    if (BE_B3_LAST_WARNINGS_V1.length) {
++      Logger.log(JSON.stringify({
++        level:"WARNING", code:"PRICE_COLUMN_WITHOUT_NAME_B3",
++        nameRow: nameDetection && nameDetection.row >= 0 ? nameDetection.row + 1 : 0,
++        columns: BE_B3_LAST_WARNINGS_V1
++      }));
++    }
++  } catch (b3Error) {
++    BE_B3_LAST_WARNINGS_V1 = [];
++  }
++
+ columns.forEach(function(c) {
+   if (c.columnIndex <= 5) {
+     Logger.log(
+@@ -815,6 +679,46 @@ columns.forEach(function(c) {
+   return buildMasterVillaObjects(columns, range);
+ }
+ 
++/** B3 - ô trông như giá: "3500", "6000 duy", "2.500.000", "1.5tr", "800k". Không nhận ngày "1/11", số nhỏ "4". */
++function beLooksLikePriceCellB3_(text) {
++  var s = String(text == null ? "" : text).trim();
++  if (!s) return false;
++  if (/^\d+(?:[.,]\d+)?\s*(?:tr|triệu|trieu|k)(?![a-zà-ỹ])/i.test(s)) return true;
++  var m = s.match(/^(\d{1,3}(?:[.,]\d{3})+|\d{3,7})(?![\d\/])/);
++  return !!m;
++}
++
++/**
++ * B3 - Trả danh sách cột trong vùng cấu hình mà hàng tên trống nhưng có >= 3 ô giá
++ * ở các hàng dưới hàng tên. Thuần, test được.
++ */
++function beFindNamelessPriceColumnsB3_(values, config, nameDetection, columns, lastColumnExclusive) {
++  var out = [];
++  if (!values || !values.length || !config) return out;
++  var nameRow = nameDetection && nameDetection.row >= 0 ? nameDetection.row : -1;
++  if (nameRow < 0 && config.nameMode === "FIXED_ROW" && config.fixedNameRowIndex >= 0) nameRow = config.fixedNameRowIndex;
++  if (nameRow < 0) return out;
++  var named = {};
++  (columns || []).forEach(function(c) { if (c && c.isVillaColumn) named[c.columnIndex] = true; });
++  var excluded = config.excludedColumnIndexes || [];
++  var lastRow = Math.min(values.length, nameRow + 1 + 70);
++  for (var c = Number(config.startColumnIndex || 0); c < lastColumnExclusive; c++) {
++    if (named[c] || excluded.indexOf(c) >= 0) continue;
++    var hits = 0, samples = [];
++    for (var r = nameRow + 1; r < lastRow; r++) {
++      var cell = values[r] ? values[r][c] : "";
++      if (beLooksLikePriceCellB3_(cell)) {
++        hits++;
++        if (samples.length < 3) samples.push(String(cell).trim().slice(0, 30));
++      }
++    }
++    if (hits >= 3) {
++      out.push({column: c + 1, letter: beColumnLetterV38_(c + 1), nameRow: nameRow + 1, priceCells: hits, samples: samples});
++    }
++  }
++  return out;
++}
++
+ function hasMasterExplicitStartColumn(rawConfig) {
+   if (!rawConfig) return false;
+ 
+@@ -835,7 +739,6 @@ function hasMasterExplicitStartColumn(rawConfig) {
+ }
+ 
+ 
+-
+ function parseMasterColumnConfig(rawConfig) {
+   const config = {
+     nameMode: "AUTO_ROW",
+@@ -1314,7 +1217,6 @@ function sanitizeMasterVillaNameFromKnownRow(value, config, values, rowIndex, co
+   const name = extractCalendarVillaName(firstLine);
+ 
+ 
+-
+   const minimumScore =
+ 
+     config && Number.isFinite(config.minimumNameScore)
+@@ -1324,28 +1226,23 @@ function sanitizeMasterVillaNameFromKnownRow(value, config, values, rowIndex, co
+       : 18;
+ 
+ 
+-
+   const numericRoomAcceptV4200 = name && beIsNumericRoomNameByContextV4200_(
+     values, rowIndex, columnIndex, config
+   );
+   const score = numericRoomAcceptV4200 ? 35 : (name ? scoreCalendarVillaName(name) : -999);
+ 
+ 
+-
+   
+ 
+ 
+-
+   if (!name) return "";
+ 
+ 
+-
+   if (isMasterDefiniteJunkCell(name) && !numericRoomAcceptV4200) {
+     return "";
+   }
+ 
+ 
+-
+   if (name.length > 180) {
+ 
+     
+@@ -1355,17 +1252,14 @@ function sanitizeMasterVillaNameFromKnownRow(value, config, values, rowIndex, co
+   }
+ 
+ 
+-
+   if (score < minimumScore && !(config && config.nameMode === "FIXED_ROW")) {
+     return "";
+   }
+ 
+ 
+-
+   
+ 
+ 
+-
+   return name;
+ 
+ }
+@@ -1778,17 +1672,118 @@ function beCalendarSheetDescriptorV4210_(sheetName, referenceDate) {
+     }
+   }
+   if (month && !year && typeof ceYearFromSheetNameV1_ === "function") year = ceYearFromSheetNameV1_(raw) || 0;
+-  if (month && !year) year = currentYear;
++
++  /*
++   * B4 - KHÔNG đoán năm mù cho tên tab.
++   * - Tên có năm hợp lệ: dùng năm đó (yearSource=NAME).
++   * - Tên không có năm ("Tháng 1"): chọn năm làm tháng gần tháng tham chiếu nhất
++   *   trong ±1 tháng (Tháng 1 xem vào tháng 12/2026 => 1/2027; Tháng 12 xem vào
++   *   tháng 1/2027 => 12/2026). Ngoài cửa sổ ±1 giữ mặc định năm hiện tại như cũ
++   *   để tab tháng cũ vẫn bị coi là cũ (yearSource=NONE).
++   * - Tên có số năm SAI ("Th 01.1027"): chỉ nhận khi tháng nằm trong ±1 tháng;
++   *   ngoài cửa sổ thì KHÔNG nhận tab là tháng nào (recognized=false), ghi cảnh báo
++   *   (yearSource=INVALID).
++   */
++  var yearSourceB4 = year ? "NAME" : "NONE";
++  if (month && !year && beSheetNameHasInvalidYearB4_(raw)) yearSourceB4 = "INVALID";
++  if (month && !year) {
++    var nearYearB4 = beNearestYearForMonthB4_(month, referenceDate, 1);
++    if (nearYearB4) year = nearYearB4;
++    else if (yearSourceB4 === "NONE") year = currentYear;
++  }
+ 
+   return {
+-    recognized:month >= 1 && month <= 12,
++    recognized:month >= 1 && month <= 12 && year > 0,
+     combined:false,
+     month:month,
+     year:year,
+-    name:raw
++    name:raw,
++    yearSource:yearSourceB4
+   };
+ }
+ 
++/** B4 - năm gần nhất để (năm, tháng) cách tháng tham chiếu tối đa maxDiff tháng; 0 nếu không có. */
++function beNearestYearForMonthB4_(month, referenceDate, maxDiff) {
++  month = Number(month || 0);
++  if (!(month >= 1 && month <= 12)) return 0;
++  referenceDate = referenceDate instanceof Date ? referenceDate : new Date();
++  var refIndex = referenceDate.getFullYear() * 12 + referenceDate.getMonth();
++  var best = 0, bestDiff = 999;
++  for (var y = referenceDate.getFullYear() - 1; y <= referenceDate.getFullYear() + 1; y++) {
++    var diff = Math.abs(y * 12 + (month - 1) - refIndex);
++    if (diff < bestDiff) { bestDiff = diff; best = y; }
++  }
++  return bestDiff <= Number(maxDiff == null ? 1 : maxDiff) ? best : 0;
++}
++
++/** B4 - tên tab có cụm số trông như năm nhưng không đọc được năm hợp lệ (vd "1027", "2O27"). */
++function beSheetNameHasInvalidYearB4_(raw) {
++  var runs = String(raw || "").match(/\d{3,}/g) || [];
++  return runs.some(function(run) {
++    if (/^20\d{2}$/.test(run)) return false;
++    if (typeof ceYearFromDigitsV1_ === "function" && ceYearFromDigitsV1_(run)) return false;
++    return true;
++  });
++}
++
++/**
++ * B4/A6 - Đọc nhanh tab (tối đa 45 hàng x 8 cột đầu) để đối chiếu cột THỨ với NGÀY.
++ * Trả năm trong candidateYears mà toàn bộ cặp (ngày, thứ) khớp; 0 nếu không đủ bằng chứng.
++ */
++function beTabWeekdayYearB4_(sheet, month, candidateYears) {
++  if (!sheet || typeof sheet.getRange !== "function") return {year:0, pairs:0};
++  var values;
++  try {
++    var rows = Math.min(45, Math.max(1, sheet.getLastRow()));
++    var cols = Math.min(8, Math.max(1, sheet.getLastColumn()));
++    values = sheet.getRange(1, 1, rows, cols).getDisplayValues();
++  } catch (e) {
++    return {year:0, pairs:0, error:String(e && e.message || e)};
++  }
++  return beWeekdayYearFromValuesB4_(values, month, candidateYears);
++}
++
++/** Thuần, test được: values là mảng 2 chiều display values. */
++function beWeekdayYearFromValuesB4_(values, month, candidateYears) {
++  var weekdayOf = function(text) {
++    var t = normalizeMasterText(text).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
++    if (!t) return -1;
++    if (/^(cn|chu nhat|sun|sunday)$/.test(t)) return 0;
++    var m = t.match(/^(?:t|thu)\s*([2-7])$/);
++    if (m) return Number(m[1]) - 1;
++    var words = {"thu hai":1,"thu ba":2,"thu tu":3,"thu nam":4,"thu sau":5,"thu bay":6,
++      mon:1,monday:1,tue:2,tuesday:2,wed:3,wednesday:3,thu:4,thursday:4,fri:5,friday:5,sat:6,saturday:6};
++    return Object.prototype.hasOwnProperty.call(words, t) ? words[t] : -1;
++  };
++  var dayOf = function(text) {
++    var s = String(text || "").trim();
++    var m = s.match(/^0?([1-9]|[12]\d|3[01])(?:\s*[\/.\-]\s*0?(\d{1,2})(?:\s*[\/.\-]\s*\d{2,4})?)?$/);
++    if (!m) return 0;
++    if (m[2] && Number(m[2]) !== Number(month)) return 0;
++    return Number(m[1]);
++  };
++  var pairs = [];
++  (values || []).forEach(function(row) {
++    var wd = -1, day = 0;
++    (row || []).forEach(function(cell) {
++      if (wd < 0) { var w = weekdayOf(cell); if (w >= 0) { wd = w; return; } }
++      if (!day) day = dayOf(cell);
++    });
++    if (wd >= 0 && day) pairs.push([day, wd]);
++  });
++  if (pairs.length < 5) return {year:0, pairs:pairs.length};
++  // Một năm được nhận khi >= 90% cặp (ngày, thứ) khớp và chỉ có đúng một năm như vậy.
++  var need = Math.max(5, Math.ceil(pairs.length * 0.9));
++  var matching = (candidateYears || []).filter(function(y) {
++    var hit = pairs.filter(function(p) {
++      var d = new Date(Number(y), Number(month) - 1, p[0]);
++      return d.getMonth() === Number(month) - 1 && d.getDay() === p[1];
++    }).length;
++    return hit >= need;
++  });
++  return {year: matching.length === 1 ? matching[0] : 0, pairs: pairs.length, matching: matching};
++}
++
+ function beIsCalendarLikeUnknownV4210_(sheet) {
+   if (!sheet) return false;
+   var raw = String(sheet.getName() || "");
+@@ -1824,6 +1819,9 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+     explicitName = "";
+   }
+ 
++  // B4: cảnh báo tên tab (năm sai / năm không khớp thứ-ngày trong tab).
++  var warningsB4 = [];
++
+   if (explicitName) {
+     var configured = beFindVisibleSheetByLooseNameV4210_(file, explicitName);
+     if (configured) {
+@@ -1832,7 +1830,8 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+         configured:explicitName,
+         sheet:configured.getName()
+       }));
+-      return {sheet:configured, mode:"CONFIG", inactiveWindow:false, configured:explicitName};
++      beCollectTabYearWarningsB4_(configured, referenceDate, warningsB4);
++      return {sheet:configured, mode:"CONFIG", inactiveWindow:false, configured:explicitName, warnings:warningsB4};
+     }
+     Logger.log(JSON.stringify({
+       level:"WARNING",code:"MASTER_CALENDAR_CONFIG_FALLBACK_V4210",
+@@ -1870,6 +1869,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+   var currentVisible=[], previousVisible=[], nextVisible=[], unknown=[];
+   candidates.forEach(function(sheet){
+     var d = beCalendarSheetDescriptorV4210_(sheet.getName(), referenceDate);
++    beCollectTabYearWarningsB4_(sheet, referenceDate, warningsB4, d);
+     if (same_(d,current)) currentVisible.push(sheet);
+     else if (same_(d,previous)) previousVisible.push(sheet);
+     else if (same_(d,next)) nextVisible.push(sheet);
+@@ -1902,8 +1902,10 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+     // V4.22.4 FIX: không fallback vào tab tháng cũ hơn tháng trước (stale).
+     // Tab không nhận ra được tháng (ví dụ "CHẠNG VẠNG") vẫn fallback như cũ.
+     var soleDescV4224 = beCalendarSheetDescriptorV4210_(candidates[0].getName(), referenceDate);
+-    var soleIsStaleV4224 = soleDescV4224.recognized &&
+-      (soleDescV4224.year * 12 + soleDescV4224.month) < (previous.year * 12 + previous.month);
++    var soleIsStaleV4224 = (soleDescV4224.recognized &&
++      (soleDescV4224.year * 12 + soleDescV4224.month) < (previous.year * 12 + previous.month)) ||
++      // B4: tab có năm sai và nằm ngoài cửa sổ tháng hiện tại không được dùng làm fallback.
++      (soleDescV4224.yearSource === "INVALID" && !soleDescV4224.recognized);
+     if (!soleIsStaleV4224) {
+       chosen = candidates[0];
+       mode = "SOLE_VISIBLE_NON_INFO_FALLBACK_V4223";
+@@ -1916,7 +1918,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+       sheet:chosen.getName(),mode:mode,
+       currentMonth:current.month,currentYear:current.year
+     }));
+-    return {sheet:chosen, mode:mode, inactiveWindow:false, configured:explicitName};
++    return {sheet:chosen, mode:mode, inactiveWindow:false, configured:explicitName, warnings:warningsB4};
+   }
+ 
+   var recognizedVisible = candidates.filter(function(sheet){
+@@ -1929,10 +1931,43 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+       visibleMonthSheets:recognizedVisible.map(function(sheet){return sheet.getName();}),
+       action:"DO_NOT_REUSE_STALE_MONTH_VILLAS"
+     }));
+-    return {sheet:null, mode:"INACTIVE_WINDOW", inactiveWindow:true, configured:explicitName};
++    return {sheet:null, mode:"INACTIVE_WINDOW", inactiveWindow:true, configured:explicitName, warnings:warningsB4};
+   }
+ 
+-  return {sheet:null, mode:"NO_CALENDAR", inactiveWindow:false, configured:explicitName};
++  return {sheet:null, mode:"NO_CALENDAR", inactiveWindow:false, configured:explicitName, warnings:warningsB4};
++}
++
++/**
++ * B4/A6 - Ghi cảnh báo cho một tab:
++ * - SHEET_NAME_YEAR_INVALID_B4: tên tab có số năm sai (vd "Th 01.1027").
++ * - SHEET_NAME_YEAR_MISMATCH_B4: tên tab ghi năm X nhưng thứ-ngày trong tab là năm Y
++ *   (vd "Tháng 11.2025" mà ngày 1 là Chủ nhật => 11/2026). Chỉ đọc nội dung tab khi
++ *   tháng của tab nằm trong ±1 tháng hiện tại mà năm trên tên lệch => rất ít lần đọc.
++ * Không tự đổi tab được chọn: chủ nguồn cần sửa tên tab.
++ */
++function beCollectTabYearWarningsB4_(sheet, referenceDate, warnings, descriptor) {
++  try {
++    var name = String(sheet && sheet.getName ? sheet.getName() : "");
++    var d = descriptor || beCalendarSheetDescriptorV4210_(name, referenceDate);
++    if (!d || d.combined) return;
++    if (d.yearSource === "INVALID") {
++      warnings.push({code:"SHEET_NAME_YEAR_INVALID_B4", sheet:name,
++        message:"Tên tab \"" + name + "\" có số năm không hợp lệ" +
++          (d.recognized ? "; tạm hiểu là tháng " + d.month + "/" + d.year : "; không nhận là tab tháng nào")});
++      return;
++    }
++    if (!d.recognized || d.yearSource !== "NAME") return;
++    var near = beNearestYearForMonthB4_(d.month, referenceDate, 1);
++    if (!near || near === d.year) return;
++    var check = beTabWeekdayYearB4_(sheet, d.month, [d.year, near]);
++    if (check.year && check.year !== d.year) {
++      warnings.push({code:"SHEET_NAME_YEAR_MISMATCH_B4", sheet:name, nameYear:d.year, contentYear:check.year,
++        message:"Tab \"" + name + "\" ghi năm " + d.year + " nhưng thứ-ngày trong tab là tháng " +
++          d.month + "/" + check.year + ". Cần đổi tên tab."});
++    }
++  } catch (e) {
++    Logger.log(JSON.stringify({level:"WARNING",code:"TAB_YEAR_CHECK_FAILED_B4",error:String(e && e.message || e)}));
++  }
+ }
+ 
+ function beFindMasterCalendarSheetV4210_(file, rawCalendarConfig, referenceDate) {
+@@ -3531,6 +3566,11 @@ function buildMasterVilla(options){
+   // Incremental luôn dùng fast image mode. Full sync qua Admin cũng bật fastImages.
+   BE_MASTER_FAST_IMAGE_MODE_V328_ = incrementalModeV328 || options.fastImages === true;
+   beClearMasterSheetRuntimeCacheV21_();
++  // B1 GhostGuard V1: reset trạng thái/ngân sách gỡ căn ảo cho lần build này.
++  if (typeof beGhostBeginRunV1_ === "function") beGhostBeginRunV1_();
++  // B7: đo thời gian từng bước.
++  beB7BeginRunV1_();
++  var b7FinalV1 = beB7SourceTimerV1_("", "__CHUAN_BI_VA_GHI_KET_QUA__");
+   var ss = SpreadsheetApp.getActiveSpreadsheet();
+   var master = ss.getSheetByName(BE_CONFIG.MASTER_SHEET);
+ 
+@@ -3679,6 +3719,7 @@ function buildMasterVilla(options){
+     };
+   }
+ 
++  b7FinalV1.mark("0_doc_master_va_master_villa_cu");
+   var previousSourceCountByLinkV328 = {};
+   var previousSourceCountByNameV328 = {};
+   previousOutputRowsV328.forEach(function(previousRow) {
+@@ -3690,6 +3731,8 @@ function buildMasterVilla(options){
+ 
+   var result = [];
+   var sourceStatuses = [];
++  // B3/B4: cảnh báo theo dòng MASTER, gắn vào cột trạng thái cuối build.
++  var warningsByRowB34 = {};
+   var opened = 0;
+   var imageDiagnostics = {
+     detected: 0,
+@@ -3787,6 +3830,7 @@ function buildMasterVilla(options){
+     );
+ 
+     var sourceStartedAtV21 = new Date().getTime();
++    var b7TimerV1 = beB7SourceTimerV1_(sourceId, source);
+     var sourceResultStartV328 = result.length;
+     var sourceQueueStartV328 = imageQueueRecordsV21.length;
+     var sourceMissingRecordStartV328 = imageDiagnostics.missingRecords.length;
+@@ -3803,6 +3847,7 @@ function buildMasterVilla(options){
+     try {
+       var file = beOpenSourceSpreadsheetV_FIX(link);  // FIX: hỗ trợ nguồn .xlsx
+       opened++;
++      b7TimerV1.mark("1_mo_file_nguon");
+ 
+       var imageVillas = [];
+       var infoVillas = [];
+@@ -3826,6 +3871,12 @@ function buildMasterVilla(options){
+       );
+       var calendarSheet = calendarSelectionV4210.sheet;
+       var inactiveCalendarWindowV4210 = calendarSelectionV4210.inactiveWindow === true;
++      beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, calendarSelectionV4210.warnings);
++      // Review 10/11 mục 2: tên màu trống không hiểu được => cảnh báo ở cột trạng thái.
++      if (typeof ceFreeColorConfigIssuesV1_ === "function") {
++        beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, ceFreeColorConfigIssuesV1_(calendarConfig));
++      }
++      b7TimerV1.mark("2_chon_tab_lich");
+       var imageSheet = calendarSheet;
+       var infoSheet = calendarSheet;
+       var hasExplicitImageSupplementV414 = beHasExplicitMetadataSheetV38_(imageConfig);
+@@ -3949,6 +4000,7 @@ function buildMasterVilla(options){
+         return villa;
+       });
+ 
++      b7TimerV1.mark("3_doc_anh_thong_tin");
+       var metadataVillas = beMergeSeparatedMetadataV32_(
+         imageVillas,
+         infoVillas
+@@ -3974,9 +4026,20 @@ function buildMasterVilla(options){
+         }
+       }
+ 
++      b7TimerV1.mark("4_cau_hinh_snapshot");
++      BE_B3_LAST_WARNINGS_V1 = [];
+       var calendarVillas = calendarSheet
+         ? readMasterFromCalendarSheet(calendarSheet, runtimeMasterConfigV340)
+         : [];
++      b7TimerV1.mark("5_doc_ten_can_tu_lich");
++      if ((BE_B3_LAST_WARNINGS_V1 || []).length) {
++        var b3Letters = BE_B3_LAST_WARNINGS_V1.map(function(w) { return w.letter; });
++        beAddSourceWarningsB34_(warningsByRowB34, masterRowNumberV328, [{
++          code:"PRICE_COLUMN_WITHOUT_NAME_B3",
++          message:"cột " + b3Letters.join(", ") + " có giá nhưng hàng tên (hàng " +
++            BE_B3_LAST_WARNINGS_V1[0].nameRow + ") trống - căn ở cột này đang bị bỏ qua"
++        }]);
++      }
+ 
+       /*
+        * V3.9 - Một căn có thể dùng một vùng tên merge và nhiều cột giá/lịch.
+@@ -4112,6 +4175,7 @@ function buildMasterVilla(options){
+           [sourceIdentityV416]
+         );
+       });
++      b7TimerV1.mark("6_loc_gom_can");
+       var reconcileDecisionV416 = beAssessSourceReconcileV416_({
+         sourceId: sourceId,
+         source: source,
+@@ -4229,6 +4293,7 @@ function buildMasterVilla(options){
+         }
+       }
+ 
++      b7TimerV1.mark("7_doi_chieu_va_ma_can");
+       var sourceIdentityRegistrationsV1 = [];
+       var villaNameCountsV40 = {};
+       villas.forEach(function(villa) {
+@@ -4255,6 +4320,19 @@ function buildMasterVilla(options){
+         // nếu registry chưa gán thì mới dùng map rename R2 hiện hữu của production.
+         if (!identityAssignmentV1) {
+           var preservedRenameSkuV4194 = confirmedRenameSkuMapV4194[Number(villa.sourceColumn || 0)] || "";
++          // B2 fix: không dùng SKU cũ nếu registry đã gán SKU đó cho một căn khác của source
++          // (tránh 2 căn cùng MÃ CĂN).
++          if (
++            preservedRenameSkuV4194 &&
++            villaIdentityAssignmentsV1 &&
++            villaIdentityAssignmentsV1.some(function(a) { return a && a.sku === preservedRenameSkuV4194; })
++          ) {
++            Logger.log(JSON.stringify({
++              level:"WARNING",code:"SOURCE_RENAME_SKU_SKIPPED_ALREADY_ASSIGNED_B2",
++              sourceId:sourceId,source:source,villa:villa.name || "",sku:preservedRenameSkuV4194
++            }));
++            preservedRenameSkuV4194 = "";
++          }
+           if (preservedRenameSkuV4194) {
+             villaSku = preservedRenameSkuV4194;
+             Logger.log(JSON.stringify({
+@@ -4263,6 +4341,25 @@ function buildMasterVilla(options){
+               sourceColumn:Number(villa.sourceColumn || 0),sku:villaSku,
+               rule:"R2_CONFIRMED_SINGLE_RENAME_SAME_UNIQUE_COLUMN"
+             }));
++            /*
++             * B2 fix: registry phải ghi nhận đây là ĐỔI TÊN của chính SKU cũ.
++             * Bản cũ để registry retire SKU này (REMOVED) trong khi MASTER_VILLA vẫn
++             * dùng nó; lần build sau căn không còn khớp registry nên bị cấp MÃ MỚI
++             * (ảnh lệch). Giờ: gán record cũ cho căn mới tên, bỏ SKU khỏi danh sách retire.
++             */
++            if (villaIdentityContextV1 && typeof beIdentityRecordsForSourceV1_ === "function") {
++              var renameRecordB2 = null;
++              beIdentityRecordsForSourceV1_(villaIdentityContextV1, sourceId, source).forEach(function(rec) {
++                if (rec && rec.sku === preservedRenameSkuV4194) renameRecordB2 = rec;
++              });
++              if (renameRecordB2) {
++                identityAssignmentV1 = {sku:preservedRenameSkuV4194, record:renameRecordB2, mode:"CONFIRMED_RENAME_V4194"};
++              }
++              var metaB2 = villaIdentityAssignmentsV1 && villaIdentityAssignmentsV1._identityMeta;
++              if (metaB2 && metaB2.removedSkus) {
++                metaB2.removedSkus = metaB2.removedSkus.filter(function(s) { return s !== preservedRenameSkuV4194; });
++              }
++            }
+           }
+         }
+ 
+@@ -4507,12 +4604,14 @@ function buildMasterVilla(options){
+         }
+       }
+ 
++      b7TimerV1.mark("8_xu_ly_tung_can_anh");
+       Logger.log(JSON.stringify({
+         code: "MASTER_SOURCE_TIMING_V21",
+         sourceId: sourceId,
+         source: source,
+         villas: villas.length,
+-        elapsedMs: new Date().getTime() - sourceStartedAtV21
++        elapsedMs: new Date().getTime() - sourceStartedAtV21,
++        stepsMsB7: b7TimerV1.steps
+       }));
+ 
+       sourceStatuses.push({
+@@ -4537,6 +4636,7 @@ function buildMasterVilla(options){
+       failedRowsV328.push(masterRowNumberV328);
+       failedIdentitiesV416.push(sourceIdentityV416);
+ 
++      b7TimerV1.mark("9_loi_nguon");
+       Logger.log(JSON.stringify({
+         level: "ERROR",
+         code: "MASTER_SOURCE_FAILED_V21",
+@@ -4570,6 +4670,7 @@ function buildMasterVilla(options){
+         outputHeaders.length
+       );
+ 
++  b7FinalV1.reset();
+   // Critical publish window: cache tập candidate hoàn chỉnh trước khi clear.
+   // Search sẽ không bao giờ đọc/cache một MASTER_VILLA đang ghi dở.
+   var masterPublishSuccessV1 = false;
+@@ -4631,10 +4732,14 @@ function buildMasterVilla(options){
+   }));
+ 
+   output.setFrozenRows(1);
+-  if (!incrementalModeV328) {
++  b7FinalV1.mark("A_ghi_master_villa");
++  // B7: autoResizeColumns chỉ để đẹp nhưng tốn vài giây mỗi build => tắt mặc định.
++  if (!incrementalModeV328 && BE_CONFIG.MASTER_AUTO_RESIZE_COLUMNS === true) {
+     output.autoResizeColumns(1, outputHeaders.length);
+   }
++  beApplySourceWarningsB34_(sourceStatuses, warningsByRowB34, rows);
+   beWriteMasterStatuses_(master, rows[0], sourceStatuses);
++  b7FinalV1.mark("B_ghi_trang_thai_nguon");
+   beSyncMissingImageOverridesV35_(
+     imageOverrideStore.sheet,
+     imageDiagnostics.missingRecords
+@@ -4678,6 +4783,7 @@ function buildMasterVilla(options){
+     }
+   }
+ 
++  b7FinalV1.mark("C_anh_va_hang_doi_anh");
+   if (villaIdentityContextV1 && typeof beFlushVillaIdentityContextV1_ === "function") {
+     try {
+       var identityFlushV1 = beFlushVillaIdentityContextV1_(villaIdentityContextV1);
+@@ -4691,6 +4797,20 @@ function buildMasterVilla(options){
+     }
+   }
+ 
++  // B1 GhostGuard V1: chỉ lưu số lần đọc / GHOST_PREVIEW / cảnh báo sau khi publish thành công.
++  if (typeof beGhostFlushV1_ === "function") {
++    try {
++      beGhostFlushV1_();
++    } catch (ghostFlushErrorV1) {
++      Logger.log(JSON.stringify({
++        level:"WARNING",code:"GHOST_GUARD_FLUSH_FAILED_V1",
++        error:String(ghostFlushErrorV1 && ghostFlushErrorV1.message ? ghostFlushErrorV1.message : ghostFlushErrorV1)
++      }));
++    }
++  }
++
++  b7FinalV1.mark("D_luu_so_ma_can_va_can_ao");
++  beB7LogSummaryV1_(incrementalModeV328 ? "INCREMENTAL" : "FULL", new Date().getTime() - buildStartedAtV21);
+   Logger.log(JSON.stringify({
+     code: "IMAGE_CACHE_SUMMARY",
+     mode: BE_CONFIG.IMAGE_CACHE_INLINE === true ? "INLINE" : "BACKGROUND_QUEUE",
+@@ -4953,15 +5073,6 @@ function beFindSourceColumnRenamePairsV416_(previousRows, villas){
+   return pairs;
+ }
+ 
+-function beRenameSkuMapV416_(renamePairs){
+-  var map = {};
+-  (renamePairs || []).forEach(function(pair){
+-    var sourceColumn = Number(pair && pair.sourceColumn || 0);
+-    var sku = cleanMasterText(pair && pair.oldSku);
+-    if (sourceColumn > 0 && sku) map[sourceColumn] = sku;
+-  });
+-  return map;
+-}
+ 
+ /**
+  * Quyết định có được replace block source hay không khi danh sách mới làm mất
+@@ -5175,6 +5286,28 @@ function beAssessSourceReconcileV416_(options){
+     };
+   }
+ 
++  // B1 GhostGuard V1: đường xác nhận bổ sung (2 lần đọc giống nhau, chặn giảm >30%).
++  // Không áp dụng khi test inject confirmedStructure để giữ nguyên test cũ.
++  if (!hasInjectedConfirmation && typeof beGhostStableReadConfirmV1_ === "function") {
++    var ghostOkV1 = null;
++    try {
++      ghostOkV1 = beGhostStableReadConfirmV1_(options, currentSet, previousCount, currentCount, missingNames);
++    } catch (ghostErrV1) {
++      Logger.log(JSON.stringify({level:"WARNING",code:"GHOST_GUARD_ERROR_V1",error:String(ghostErrV1 && ghostErrV1.message || ghostErrV1)}));
++      ghostOkV1 = null;
++    }
++    if (ghostOkV1) {
++      return {
++        allow:true,
++        mode:"CONFIRMED_REMOVAL",
++        reason:"GHOST_GUARD_STABLE_READS_V1",
++        missingNames:missingNames,
++        renamePairs:renamePairs,
++        stableReads:ghostOkV1.reads
++      };
++    }
++  }
++
+   var queued = false;
+   var prioritySource = {
+     id:String(options.sourceId || ""),
+@@ -5511,9 +5644,7 @@ function applyDeletedSourceOrphansV4196(){
+ 
+   var ss=SpreadsheetApp.getActiveSpreadsheet();
+   var villa=ss.getSheetByName(BE_CONFIG.MASTER_VILLA_SHEET||"MASTER_VILLA");
+-  preview.rows.slice().sort(function(a,b){return Number(b.sheetRow)-Number(a.sheetRow);}).forEach(function(item){
+-    villa.deleteRow(Number(item.sheetRow));
+-  });
++  beDeleteSheetRowsBatchedB7_(villa, preview.rows.map(function(item){return Number(item.sheetRow);}));
+   if(typeof clearBookingEngineCache==="function")clearBookingEngineCache();
+   var uniqueSources={};
+   preview.rows.forEach(function(x){if(x.source)uniqueSources[x.source]=true;});
+@@ -5582,7 +5713,7 @@ function autoApplyDeletedSourceOrphansV619_(options){
+     if(g.source)sourceNames[g.source]=true;
+     g.rows.forEach(function(item){rows.push(item);if(item.sku)skus.push(item.sku);});
+   });
+-  rows.slice().sort(function(a,b){return Number(b.sheetRow)-Number(a.sheetRow);}).forEach(function(item){villa.deleteRow(Number(item.sheetRow));});
++  beDeleteSheetRowsBatchedB7_(villa, rows.map(function(item){return Number(item.sheetRow);}));
+ 
+   var identity=null;
+   if(typeof beRetireVillaIdentitySkusV619_==="function"){
+@@ -5595,6 +5726,23 @@ function autoApplyDeletedSourceOrphansV619_(options){
+   return result;
+ }
+ 
++/**
++ * B7 - Xóa nhiều dòng theo khối liền nhau, từ dưới lên (không để lệch số dòng).
++ * 150 dòng của một nguồn thường liền nhau => 1 lệnh deleteRows thay vì 150 lệnh deleteRow.
++ */
++function beDeleteSheetRowsBatchedB7_(sheet, rowNumbers) {
++  var sorted = (rowNumbers || []).map(Number).filter(function(r){ return r > 1; })
++    .sort(function(a, b){ return b - a; });
++  var blocks = [];
++  sorted.forEach(function(r){
++    var last = blocks[blocks.length - 1];
++    if (last && r === last.start - 1) { last.start = r; last.count++; }
++    else if (!last || r !== last.start) { blocks.push({start: r, count: 1}); }
++  });
++  blocks.forEach(function(b){ sheet.deleteRows(b.start, b.count); });
++  return {rows: sorted.length, calls: blocks.length};
++}
++
+ function testDeletedSourceAutoGuardV619(){
+   var activeIds={"176":true};
+   function canDelete(identitySourceId){var sid=String(identitySourceId||"").trim();return !!sid&&!activeIds[sid];}
+@@ -5985,34 +6133,6 @@ function reconcileImageOverridesV330(){
+   return beReconcileImageOverridesV330_(SpreadsheetApp.getActiveSpreadsheet());
+ }
+ 
+-/** Self-test logic thuần, không sửa sheet. */
+-function testImageOverrideReconcileV330_(){
+-  var cases = [
+-    [true,true,true,"KEEP_MANUAL"],
+-    [true,false,false,"KEEP_MANUAL"],
+-    [false,true,true,"DELETE_RESOLVED"],
+-    [false,false,false,"DELETE_ORPHAN"],
+-    [false,true,false,"KEEP_MISSING"]
+-  ];
+-
+-  cases.forEach(function(item){
+-    var got = beClassifyImageOverrideRowV330_(item[0],item[1],item[2]);
+-    if (got !== item[3]) {
+-      throw new Error("V330 FAIL override reconcile: " + JSON.stringify({case:item,got:got}));
+-    }
+-  });
+-
+-  var result={
+-    success:true,
+-    version:"3.3.0-image-override-reconcile",
+-    manualKeepPass:true,
+-    resolvedDeletePass:true,
+-    orphanDeletePass:true,
+-    missingKeepPass:true
+-  };
+-  Logger.log(JSON.stringify({code:"IMAGE_OVERRIDE_RECONCILE_PASS_V330",result:result}));
+-  return result;
+-}
+ function beGetByHeader_(row,index){return index>=0&&index<row.length?row[index]:"";}
+ function beBoolCell_(v){return v===true||["true","1","yes","co","x"].indexOf(ceNormalize_(v))>=0;}
+ function beWriteMasterStatuses_(sheet,headerRow,statuses){
+@@ -6042,10 +6162,103 @@ function beWriteMasterStatuses_(sheet,headerRow,statuses){
+   updateColumn_(h.status,function(x){return x.status;});
+   updateColumn_(h.lastSync,function(x){return x.time;});
+ }
+-function beFindInfoSheetV31_(file, rawMasterConfig){
+-  return beFindMetadataSheetV32_(file, rawMasterConfig, "INFO");
++/**
++ * B7 - Đo thời gian từng bước của build MASTER.
++ * Mỗi nguồn có một bộ đếm: mark(bước) cộng thời gian kể từ lần mark trước.
++ * Cuối build in MASTER_BUILD_STEP_TIMING_B7: tổng theo bước + 10 nguồn chậm nhất.
++ */
++var BE_B7_RUN_V1 = null;
++
++function beB7BeginRunV1_() {
++  BE_B7_RUN_V1 = {steps: {}, sources: []};
++  return BE_B7_RUN_V1;
++}
++
++function beB7SourceTimerV1_(sourceId, source) {
++  if (!BE_B7_RUN_V1) beB7BeginRunV1_();
++  var run = BE_B7_RUN_V1;
++  var timer = {sourceId: String(sourceId || ""), source: String(source || ""), steps: {}, last: new Date().getTime(), total: 0};
++  run.sources.push(timer);
++  timer.mark = function(step) {
++    var now = new Date().getTime();
++    var ms = now - timer.last;
++    timer.last = now;
++    timer.steps[step] = (timer.steps[step] || 0) + ms;
++    timer.total += ms;
++    run.steps[step] = (run.steps[step] || 0) + ms;
++    return ms;
++  };
++  timer.reset = function() { timer.last = new Date().getTime(); };
++  return timer;
++}
++
++function beB7LogSummaryV1_(mode, elapsedMs) {
++  var run = BE_B7_RUN_V1;
++  if (!run) return null;
++  var steps = Object.keys(run.steps).sort().map(function(k) {
++    return {step: k, ms: run.steps[k], pct: elapsedMs > 0 ? Math.round(run.steps[k] * 100 / elapsedMs) : 0};
++  });
++  var slow = run.sources.filter(function(t) { return t.source.indexOf("__") !== 0; })
++    .sort(function(a, b) { return b.total - a.total; }).slice(0, 10)
++    .map(function(t) { return {sourceId: t.sourceId, source: t.source, ms: t.total, steps: t.steps}; });
++  var summary = {code: "MASTER_BUILD_STEP_TIMING_B7", mode: mode, elapsedMs: elapsedMs,
++    sources: run.sources.length - 1, steps: steps, slowestSources: slow};
++  Logger.log(JSON.stringify(summary));
++  try {
++    PropertiesService.getScriptProperties().setProperty("BE_B7_LAST_BUILD_TIMING", JSON.stringify(summary).slice(0, 8500));
++  } catch (ignore) {}
++  return summary;
++}
++
++/** Xem số đo của lần build gần nhất (chạy tay trong Apps Script). */
++function showLastBuildTimingB7() {
++  var raw = PropertiesService.getScriptProperties().getProperty("BE_B7_LAST_BUILD_TIMING") || "{}";
++  var data = JSON.parse(raw);
++  Logger.log(JSON.stringify(data, null, 2));
++  return data;
+ }
+ 
++/** B3/B4 - gom cảnh báo theo dòng MASTER (không trùng lặp). */
++function beAddSourceWarningsB34_(store, row, warnings) {
++  if (!store || !row || !warnings || !warnings.length) return;
++  var list = store[row] = store[row] || [];
++  warnings.forEach(function(w) {
++    var msg = String(w && w.message || w && w.code || "");
++    if (msg && list.indexOf(msg) < 0) list.push(msg);
++  });
++}
++
++/** B3/B4 - gắn cảnh báo vào trạng thái nguồn + 1 sự kiện tổng hợp mỗi build. */
++function beApplySourceWarningsB34_(statuses, store, masterRows) {
++  var rowsWithWarnings = Object.keys(store || {});
++  if (!rowsWithWarnings.length) return;
++  var touched = {};
++  (statuses || []).forEach(function(st) {
++    var list = store[Number(st && st.row || 0)];
++    if (!list || !list.length) return;
++    st.status = String(st.status || "") + " | ⚠ " + list.join("; ");
++    touched[st.row] = true;
++  });
++  var hMap = masterRows && masterRows.length ? beHeaderMap_(masterRows[0]) : null;
++  var summary = rowsWithWarnings.map(function(row) {
++    var mrow = masterRows && masterRows[Number(row) - 1] || [];
++    return {
++      row:Number(row),
++      sourceId:hMap ? cleanMasterText(beGetByHeader_(mrow, hMap.id)) : "",
++      source:hMap ? cleanMasterText(beGetByHeader_(mrow, hMap.source)) : "",
++      warnings:store[row]
++    };
++  });
++  Logger.log(JSON.stringify({level:"WARNING", code:"MASTER_SOURCE_WARNINGS_B34", sources:summary.length, detail:summary}));
++  if (typeof beEmitSystemEventV30_ === "function") {
++    beEmitSystemEventV30_("WARNING", "MASTER_SOURCE_WARNINGS_B34", {
++      message: summary.length + " nguồn có cảnh báo cấu hình/tên tab",
++      sources: summary
++    });
++  }
++}
++
++
+ /**
+  * CONFIG MASTER là nền chung. CONFIG ẢNH và CONFIG THÔNG TIN chỉ ghi đè
+  * các khóa được nhập, nên ghi ngắn VÙNG_HÀNG_ẢNH=1 hoặc HÀNG_THÔNG_TIN=2
+@@ -7255,9 +7468,6 @@ function beBuildOverGridImageMapV40_(sheet) {
+   return result;
+ }
+ 
+-function beFindOverGridImageForColumnV40_(imageMap, columnIndex, allowedRows, sheet) {
+-  return beFindOverGridImageForColumnV42_(imageMap, columnIndex, allowedRows, sheet);
+-}
+ 
+ /**
+  * V4.2 - Ảnh nổi chỉ hợp lệ khi ô neo nằm đúng vùng hàng ảnh cấu hình.
+@@ -8525,48 +8735,6 @@ function beAssignImagesBySequenceV46_(villas, imageVillas, rawImageConfig, sheet
+ }
+ 
+ 
+-
+-/** V4.14 self-test an toàn, không mở source. */
+-function testMasterSafeConfigV414_(){
+-  var cfg = parseMasterColumnConfig("TÊN_CỐ_ĐỊNH=B37 VILLA;START_COL=3;END_COL=3;FALLBACK=FALSE");
+-  if (cfg.fixedName !== "B37 VILLA" || cfg.startColumnIndex !== 2 || cfg.endColumnIndex !== 2) {
+-    throw new Error("V414 FAIL FIXED_NAME parse: " + JSON.stringify(cfg));
+-  }
+-
+-  var values = [["","",""],["","",""],["","","1000000"]];
+-  var formulas = [["","",""],["","",""],["","",""]];
+-  var villas = readMasterFromColumnLayout(values, formulas, "FIXED_NAME=B37 VILLA;START_COL=3;END_COL=3;FALLBACK=FALSE");
+-  if (villas.length !== 1 || villas[0].name !== "B37 VILLA" || Number(villas[0].sourceColumn) !== 3) {
+-    throw new Error("V414 FAIL FIXED_NAME reader: " + JSON.stringify(villas));
+-  }
+-
+-  var multi = beCleanMasterMultilineTextV414_("Dalat Mercury Villa\nĐ/C: 5B Đồng Đa\nLH: 0909");
+-  if (getCalendarFirstMeaningfulLine(multi) !== "Dalat Mercury Villa") {
+-    throw new Error("V414 FAIL multiline name: " + multi);
+-  }
+-
+-  if (!beSupplementNameCompatibleV414_("MP VILLA", "MP VILLA - 5PN") || beSupplementNameCompatibleV414_("A1", "A10")) {
+-    throw new Error("V414 FAIL supplement safe name matcher");
+-  }
+-
+-  var merged = beMergeVillaMetadataV31_(
+-    [{name:"MP VILLA",sourceColumn:3,standard:"",bedrooms:"",info:"",maps:"",groupOptions:[]}],
+-    [
+-      {name:"MP VILLA",sourceColumn:7,image:"https://example.com/a.jpg",imageSource:"https://example.com/a.jpg",hasRealCellImage:true},
+-      {name:"MP VILLA",sourceColumn:2,info:"5PN - 12 khách",standard:"12",bedrooms:"5",hasInfoEvidence:true,infoValueCount:1}
+-    ],
+-    {allowSafeNameMatch:true}
+-  );
+-  if (merged.length !== 1 || merged[0].sourceColumn !== 3 || merged[0].info !== "5PN - 12 khách" || !merged[0].imageSource) {
+-    throw new Error("V414 FAIL supplement merge: " + JSON.stringify(merged));
+-  }
+-
+-  var result={success:true,version:"4.14-safe-config-supplement",fixedNamePass:true,multilinePass:true,supplementMatchPass:true};
+-  Logger.log(JSON.stringify({code:"MASTER_SAFE_CONFIG_PASS_V414",result:result}));
+-  return result;
+-}
+-
+-
+ /** V4.22.4 tests - private-room persistence + Drive folder source. */
+ function testPrivateRoomPersistenceV4224(){
+   var cases=[
+diff --git a/OpsChecksV1.js b/OpsChecksV1.js
+new file mode 100644
+index 0000000..8ea6a06
+--- /dev/null
++++ b/OpsChecksV1.js
+@@ -0,0 +1,210 @@
++/**
++ * OpsChecksV1.js - công cụ KIỂM TRA CHỈ ĐỌC (không ghi gì), chạy tay trong Apps Script.
++ */
++
++/**
++ * C3 - Ảnh live có lẫn thư mục dev không?
++ * - Thư mục cache ảnh dự án này đang dùng (theo Config + Script Property).
++ * - Đếm ảnh trong MASTER_VILLA: nằm trong thư mục đó / nằm ở thư mục Drive khác / không phải ảnh Drive.
++ * Không tạo thư mục, không đổi quyền, không xóa file.
++ */
++function checkImageFolderC3() {
++  var isolated = BE_CONFIG.IMAGE_DRIVE_ISOLATED === true;
++  var propertyKey = String(BE_CONFIG.IMAGE_DRIVE_PROPERTY_KEY ||
++    (isolated ? "BE_IMAGE_DRIVE_FOLDER_ID_DEV_V2" : "BE_IMAGE_DRIVE_FOLDER_ID")).trim();
++  var configuredId = String(BE_CONFIG.IMAGE_DRIVE_FOLDER_ID || "").trim();
++  var savedId = String(PropertiesService.getScriptProperties().getProperty(propertyKey) || "").trim();
++  var prodSavedId = String(PropertiesService.getScriptProperties().getProperty("BE_IMAGE_DRIVE_FOLDER_ID") || "").trim();
++  var folderId = configuredId || savedId;
++  var out = {
++    success: true, code: "IMAGE_FOLDER_CHECK_C3",
++    configFolderName: String(BE_CONFIG.IMAGE_DRIVE_FOLDER_NAME || ""),
++    isolated: isolated, propertyKey: propertyKey, folderId: folderId,
++    otherProjectPropertyFolderId: prodSavedId || "",
++    folderName: "", filesInFolder: 0, filesCapped: false,
++    masterImages: {total: 0, inFolder: 0, otherDriveFolder: 0, notDrive: 0, samplesOtherFolder: []}
++  };
++  var inFolder = {};
++  if (folderId) {
++    try {
++      var folder = DriveApp.getFolderById(folderId);
++      out.folderName = folder.getName();
++      var it = folder.getFiles(), n = 0;
++      while (it.hasNext() && n < 8000) { inFolder[it.next().getId()] = true; n++; }
++      out.filesInFolder = n;
++      out.filesCapped = it.hasNext();
++    } catch (e) {
++      out.success = false;
++      out.folderError = String(e && e.message || e);
++    }
++  } else {
++    out.folderError = "Chưa có thư mục cache ảnh (chưa chạy Image Worker lần nào).";
++  }
++  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(BE_CONFIG.MASTER_VILLA_SHEET || "MASTER_VILLA");
++  if (sh && sh.getLastRow() > 1) {
++    var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(normalizeMasterText);
++    var col = head.indexOf(normalizeMasterText("ẢNH"));
++    if (col >= 0) {
++      sh.getRange(2, col + 1, sh.getLastRow() - 1, 1).getDisplayValues().forEach(function(r) {
++        var url = String(r[0] || "").trim();
++        if (!url) return;
++        out.masterImages.total++;
++        var m = url.match(/\/d\/([a-zA-Z0-9_-]{20,})/) || url.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
++        if (!m) { out.masterImages.notDrive++; return; }
++        if (inFolder[m[1]]) out.masterImages.inFolder++;
++        else {
++          out.masterImages.otherDriveFolder++;
++          if (out.masterImages.samplesOtherFolder.length < 10) out.masterImages.samplesOtherFolder.push(url);
++        }
++      });
++    }
++  }
++  out.verdict = !folderId ? "CHƯA CÓ THƯ MỤC" :
++    (out.filesCapped ? "THƯ MỤC QUÁ LỚN, CHỈ ĐẾM 8000 FILE ĐẦU" :
++    (out.masterImages.otherDriveFolder === 0 ? "OK: mọi ảnh Drive của MASTER_VILLA nằm trong đúng 1 thư mục cache" :
++      "CẦN XEM: có ảnh Drive nằm ngoài thư mục cache (ảnh thay tay hoặc ảnh từ dự án khác)"));
++  Logger.log(JSON.stringify(out, null, 2));
++  return out;
++}
++
++/**
++ * Review 10/11 mục 3 - CHẨN ĐOÁN "ô có màu nhưng app báo trống" trên dữ liệu thật.
++ * Chạy tay: diagnoseCellColorV1("VL-XXXXXXXXXX", "2026-11-20")  (mã căn trong MASTER_VILLA, ngày ở)
++ * Chỉ đọc. Kết quả cho biết đúng ô app đang đọc, màu app thấy, màu thật của ô,
++ * định dạng có điều kiện / dải màu xen kẽ (banding) đè lên ô, snapshot đang lưu gì.
++ *
++ * Nguyên nhân thường gặp mà bản kiểm tra này phân biệt được:
++ *  A. ĐỊNH DẠNG CÓ ĐIỀU KIỆN: chủ nhà tô màu bằng quy tắc (vd ô chứa "cọc" => đỏ).
++ *     Apps Script getBackgrounds() chỉ thấy màu tô tay, KHÔNG thấy màu của quy tắc.
++ *  B. DẢI MÀU XEN KẼ (Alternating colors / bảng): cũng không hiện trong getBackgrounds().
++ *  C. APP ĐỌC NHẦM Ô: hàng ngày hoặc cột căn bị dò lệch => ô app đọc khác ô người nhìn.
++ *  D. SNAPSHOT CŨ: ô vừa tô màu nhưng snapshot chưa dựng lại.
++ *  E. Màu chữ thay vì màu nền: quy tắc đã chốt chỉ xét màu NỀN.
++ */
++function diagnoseCellColorV1(villaId, dateText) {
++  var out = {success: true, code: "CELL_COLOR_DIAGNOSE_V1", villaId: String(villaId || ""), date: String(dateText || ""), causes: []};
++  var villa = null;
++  (ceReadMasterVillas_() || []).forEach(function(v) { if (String(v.id || "") === out.villaId) villa = v; });
++  if (!villa) { out.success = false; out.error = "Không thấy mã căn trong MASTER_VILLA"; Logger.log(JSON.stringify(out, null, 2)); return out; }
++  var date = ceParseInputDate_(dateText);
++  if (!date) { out.success = false; out.error = "Ngày không hợp lệ (dùng yyyy-MM-dd)"; Logger.log(JSON.stringify(out, null, 2)); return out; }
++  out.villa = {name: villa.name, source: villa.source, sourceColumn: villa.sourceColumn, config: villa.config};
++
++  var file = ceOpenSpreadsheetFastV23_(villa.calendarUrl);
++  var ctx = ceCreateSourceContextV30_(file, {source: villa.source || "", candidates: 1,
++    maxColumn: Number(villa.sourceColumn || 0), requiresFullScan: Number(villa.sourceColumn || 0) <= 0});
++  var loc = ceFindVillaNightCellV34_(ctx, villa, date, "", 0);
++  if (!loc) { out.success = false; out.error = "App không tìm thấy ô của ngày này"; Logger.log(JSON.stringify(out, null, 2)); return out; }
++  var cellA1 = ceColumnToLetterV33_(loc.column + 1) + (loc.row + 1);
++  var state = ceReadCalendarCellStateV34_(loc.context, loc.row, loc.column, villa.config, villa, loc.optionLabel || "");
++  out.appReads = {sheet: loc.context.name, cell: cellA1, status: state.status, reason: state.reason,
++    backgroundSeenByApp: state.background, display: state.display, price: state.price};
++  if (Number(villa.sourceColumn || 0) && Number(villa.sourceColumn) !== loc.column + 1) {
++    out.causes.push("C. Cột app đọc (" + ceColumnToLetterV33_(loc.column + 1) + ") khác CỘT NGUỒN trong MASTER_VILLA (" +
++      ceColumnToLetterV33_(Number(villa.sourceColumn)) + "): kiểm tra tên căn ở hàng tên.");
++  }
++
++  var sheet = file.getSheetByName(loc.context.name);
++  var cell = sheet.getRange(loc.row + 1, loc.column + 1);
++  out.live = {background: cell.getBackground(), fontColor: "", displayValue: cell.getDisplayValue(), isPartOfMerge: false};
++  try { out.live.fontColor = cell.getFontColorObject ? String(cell.getFontColorObject().asRgbColor().asHexString()) : cell.getFontColor(); } catch (e1) { try { out.live.fontColor = cell.getFontColor(); } catch (ignore) {} }
++  try { out.live.isPartOfMerge = cell.isPartOfMerge(); } catch (ignore2) {}
++  try {
++    var bo = cell.getBackgroundObject();
++    out.live.backgroundColorType = bo ? String(bo.getColorType()) : "";
++  } catch (ignore3) {}
++
++  // A. Định dạng có điều kiện có tô nền ô này không.
++  var cf = [];
++  try {
++    (sheet.getConditionalFormatRules() || []).forEach(function(rule, i) {
++      var hits = (rule.getRanges() || []).some(function(r) {
++        return loc.row + 1 >= r.getRow() && loc.row + 1 <= r.getLastRow() && loc.column + 1 >= r.getColumn() && loc.column + 1 <= r.getLastColumn();
++      });
++      if (!hits) return;
++      var info = {rule: i + 1, ranges: (rule.getRanges() || []).map(function(r) { return r.getA1Notation(); }).join(",")};
++      var b = rule.getBooleanCondition();
++      if (b) { info.type = String(b.getCriteriaType()); info.values = (b.getCriteriaValues() || []).map(String); info.background = b.getBackground ? b.getBackground() : null; }
++      if (rule.getGradientCondition && rule.getGradientCondition()) info.type = "GRADIENT";
++      cf.push(info);
++    });
++  } catch (e2) { out.conditionalFormatError = String(e2 && e2.message || e2); }
++  out.conditionalFormatRulesOnCell = cf;
++  if (cf.some(function(x) { return x.background || x.type === "GRADIENT"; })) {
++    out.causes.push("A. Ô có ĐỊNH DẠNG CÓ ĐIỀU KIỆN tô nền. App không nhìn thấy màu này => nhờ chủ nguồn tô màu tay, hoặc báo em thêm quy tắc đọc chữ cho nguồn này.");
++  }
++
++  // B. Dải màu xen kẽ.
++  try {
++    var bands = cell.getBandings ? cell.getBandings() : [];
++    if (bands && bands.length) {
++      out.bandings = bands.map(function(b) { return b.getRange().getA1Notation(); });
++      out.causes.push("B. Ô nằm trong DẢI MÀU XEN KẼ (" + out.bandings.join(",") + "): màu này app không thấy.");
++    }
++  } catch (ignore4) {}
++
++  // So màu app thấy với màu thật của ô.
++  var liveBg = String(out.live.background || "").toLowerCase();
++  if (liveBg && liveBg !== String(state.background || "").toLowerCase() && !out.live.isPartOfMerge) {
++    out.causes.push("C/D. Màu thật của ô (" + liveBg + ") khác màu app đang dùng (" + state.background + "): app đọc nhầm ô hoặc dữ liệu tải lúc trước.");
++  }
++  if (state.status === "FREE" && out.live.fontColor && !/^#0{6}$/.test(String(out.live.fontColor).toLowerCase()) && ceIsWhiteV34_(liveBg)) {
++    out.causes.push("E. Nền trắng nhưng chữ có màu (" + out.live.fontColor + "): quy tắc chỉ xét màu nền nên ô này là TRỐNG.");
++  }
++
++  // D. Snapshot đang lưu gì cho đêm này.
++  try {
++    var snapCtx = ssLoadScheduleSnapshotContextV320_(true, [date]);
++    var snap = ssTryReadVillaSnapshotV320_(snapCtx, villa, [date], 0);
++    out.snapshot = {usable: !!(snap && snap.usable), reason: snap && snap.reason || "",
++      available: snap && snap.readResult ? snap.readResult.available : null};
++    if (snap && snap.usable && snap.readResult && snap.readResult.available === true && state.status !== "FREE") {
++      out.causes.push("D. SNAPSHOT CŨ báo TRỐNG trong khi đọc trực tiếp là " + state.status + ": snapshot chưa dựng lại sau khi tô màu.");
++    }
++  } catch (e5) { out.snapshotError = String(e5 && e5.message || e5); }
++
++  if (!out.causes.length) out.causes.push(state.status === "FREE"
++    ? "Ô thật sự nền trắng theo dữ liệu Google trả về. Nếu mắt thấy có màu => kiểm tra A/B trên tab (định dạng có điều kiện, bảng)."
++    : "App đọc đúng: " + state.status + ".");
++  Logger.log(JSON.stringify(out, null, 2));
++  return out;
++}
++
++/**
++ * Mục 3 - Rà các nguồn đang bật xem tab lịch hiện hành có ĐỊNH DẠNG CÓ ĐIỀU KIỆN tô nền
++ * hay không (màu app không nhìn thấy). Chỉ đọc, chạy theo lô:
++ *   auditConditionalColorsV1()        // 40 nguồn đầu
++ *   auditConditionalColorsV1(40, 40)  // 40 nguồn tiếp theo
++ */
++function auditConditionalColorsV1(startIndex, count) {
++  var started = new Date().getTime();
++  startIndex = Math.max(0, Number(startIndex || 0));
++  count = Math.max(1, Number(count || 40));
++  var sources = (opsListMasterSourcesV312_(true).sources || []).filter(function(s) {
++    return /docs\.google\.com\/spreadsheets\/d\//.test(String(s.link || ""));
++  });
++  var out = {success: true, code: "CONDITIONAL_COLOR_AUDIT_V1", totalSources: sources.length, from: startIndex, risky: [], errors: [], checked: 0};
++  for (var i = startIndex; i < Math.min(sources.length, startIndex + count); i++) {
++    if (new Date().getTime() - started > 300000) { out.stoppedAt = i; break; }
++    var s = sources[i];
++    try {
++      var file = ceOpenSpreadsheetFastV23_(s.link);
++      var sel = beMasterCalendarSelectionV4210_(file, s.configCalendar || "AUTO", new Date());
++      out.checked++;
++      if (!sel.sheet) continue;
++      var rules = (sel.sheet.getConditionalFormatRules() || []).filter(function(rule) {
++        var b = rule.getBooleanCondition();
++        return (b && b.getBackground && b.getBackground()) || (rule.getGradientCondition && rule.getGradientCondition());
++      });
++      if (rules.length) {
++        out.risky.push({id: s.id, source: s.source, row: s.row, sheet: sel.sheet.getName(), rules: rules.length,
++          ranges: rules.map(function(r) { return (r.getRanges() || []).map(function(x) { return x.getA1Notation(); }).join(","); }).slice(0, 5)});
++      }
++    } catch (e) {
++      out.errors.push({id: s.id, source: s.source, error: String(e && e.message || e).slice(0, 120)});
++    }
++  }
++  out.next = out.stoppedAt != null ? out.stoppedAt : (startIndex + count < sources.length ? startIndex + count : null);
++  Logger.log(JSON.stringify(out, null, 2));
++  return out;
++}
+diff --git a/PriceEngine.js b/PriceEngine.js
+index 5f087e3..f4d8341 100644
+--- a/PriceEngine.js
++++ b/PriceEngine.js
+@@ -84,6 +84,3 @@ function ceSortSearchResultsV30_(results, sortMode) {
+   return results;
+ }
+ 
+-function cePriceFilterIsActiveV30_(minPrice, maxPrice) {
+-  return ceNormalizePriceFilterV30_(minPrice) > 0 || ceNormalizePriceFilterV30_(maxPrice) > 0;
+-}
+diff --git a/QualityTestsV1.js b/QualityTestsV1.js
+new file mode 100644
+index 0000000..d972db0
+--- /dev/null
++++ b/QualityTestsV1.js
+@@ -0,0 +1,245 @@
++/**
++ * QualityTestsV1.js - test thuần (không đọc/ghi Sheet) cho các bản sửa B3, B4, B6.
++ * Chạy trong Apps Script: testQualityFixesV1()
++ */
++function testQualityFixesV1() {
++  var results = [
++    testTabYearPolicyB4(),
++    testNamelessPriceColumnsB3()
++  ];
++  if (typeof testBlankCellUnknownB6 === "function") results.push(testBlankCellUnknownB6());
++  results.push(testNewYearCalendarB5());
++  results.push(testBatchedRowDeleteB7());
++  results.push(testNoAccessCacheB10());
++  results.push(testAiBreakerRulesV1());
++  results.push(testColoredCellBusyV1());
++  results.push(testXlsxTempDecisionV1());
++  var out = {success: true, code: "QUALITY_FIXES_PASS_V1", suites: results.map(function(r) { return r.code; })};
++  Logger.log(JSON.stringify(out));
++  return out;
++}
++
++function qualityAssertV1_(cond, message) {
++  if (!cond) throw new Error("QUALITY_TEST_FAIL: " + message);
++}
++
++function testTabYearPolicyB4() {
++  var nov = new Date(2026, 10, 9), dec = new Date(2026, 11, 20), jan = new Date(2027, 0, 5);
++  var d;
++  d = beCalendarSheetDescriptorV4210_("Th 01.1027", nov);
++  qualityAssertV1_(!d.recognized && d.yearSource === "INVALID", "Th 01.1027 tháng 11/2026 không được đoán thành 1/2026");
++  d = beCalendarSheetDescriptorV4210_("Th 01.1027", jan);
++  qualityAssertV1_(d.recognized && d.year === 2027 && d.month === 1, "Th 01.1027 vào tháng 1/2027 => 1/2027");
++  d = beCalendarSheetDescriptorV4210_("Tháng 1", dec);
++  qualityAssertV1_(d.year === 2027, "Tháng 1 xem vào 12/2026 => 1/2027");
++  d = beCalendarSheetDescriptorV4210_("Tháng 12", jan);
++  qualityAssertV1_(d.year === 2026, "Tháng 12 xem vào 1/2027 => 12/2026");
++  d = beCalendarSheetDescriptorV4210_("Tháng 3", nov);
++  qualityAssertV1_(d.year === 2026, "Tháng 3 xem vào 11/2026 vẫn là 3/2026 (tab cũ)");
++  d = beCalendarSheetDescriptorV4210_("Tháng 11.2025", nov);
++  qualityAssertV1_(d.year === 2025 && d.yearSource === "NAME", "tên có năm hợp lệ giữ nguyên năm trên tên");
++
++  // Nội dung tab tháng 11/2026: ngày 1 là Chủ nhật.
++  var vals = [["Thứ", "Ngày", "Villa A"]];
++  var wd = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
++  for (var i = 1; i <= 30; i++) vals.push([wd[new Date(2026, 10, i).getDay()], String(i), ""]);
++  var check = beWeekdayYearFromValuesB4_(vals, 11, [2025, 2026]);
++  qualityAssertV1_(check.year === 2026, "thứ-ngày trong tab phải nhận ra năm 2026");
++  var sheet = {
++    getName: function() { return "Tháng 11.2025"; }, getLastRow: function() { return 31; },
++    getLastColumn: function() { return 3; }, isSheetHidden: function() { return false; },
++    getIndex: function() { return 1; },
++    getRange: function() { return {getDisplayValues: function() { return vals; }}; }
++  };
++  var warnings = [];
++  beCollectTabYearWarningsB4_(sheet, nov, warnings);
++  qualityAssertV1_(warnings.length === 1 && warnings[0].code === "SHEET_NAME_YEAR_MISMATCH_B4", "phải cảnh báo tab ghi sai năm");
++
++  // Tháng 12/2026: tab Tháng 12 đã ẩn, tab Tháng 1 (không ghi năm) đang mở => chuyển sang Tháng 1.
++  function mock(name, hidden, index) {
++    return {getName: function() { return name; }, isSheetHidden: function() { return hidden; },
++      getIndex: function() { return index; }, getLastRow: function() { return 40; }, getLastColumn: function() { return 12; }};
++  }
++  var sel = beMasterCalendarSelectionV4210_({getSheets: function() { return [mock("Tháng 12", true, 1), mock("Tháng 1", false, 2)]; }}, "AUTO", new Date(2026, 11, 28));
++  qualityAssertV1_(sel.sheet && sel.sheet.getName() === "Tháng 1", "cuối năm phải chuyển sang tab Tháng 1");
++  var sel2 = beMasterCalendarSelectionV4210_({getSheets: function() { return [mock("Th 01.1027", false, 1)]; }}, "AUTO", nov);
++  qualityAssertV1_(!sel2.sheet && sel2.warnings.length === 1, "tab năm sai ngoài cửa sổ tháng không được dùng, có cảnh báo");
++  return {success: true, code: "TAB_YEAR_POLICY_PASS_B4"};
++}
++
++function testNamelessPriceColumnsB3() {
++  var vals = [["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""],
++    ["Thứ", "Ngày", "Villa C6", "", "B3", "", "1A5"], ["", "", "zalo", "10pn", "zalo", "7pn", "zalo"]];
++  for (var i = 1; i <= 10; i++) vals.push(["T" + (2 + i % 6), String(i), "3500", "6000 duy", "2.500.000", "1.5tr", "800k"]);
++  var formulas = vals.map(function(r) { return r.map(function() { return ""; }); });
++  var villas = readMasterFromColumnLayout(vals, formulas, "FIXED_ROW=3;START_COL=3;END_COL=7;FALLBACK=FALSE");
++  qualityAssertV1_(villas.length === 3, "đọc đúng 3 căn có tên");
++  var letters = BE_B3_LAST_WARNINGS_V1.map(function(w) { return w.letter; }).join(",");
++  qualityAssertV1_(letters === "D,F", "phải cảnh báo cột D,F có giá mà không có tên, thực tế=" + letters);
++  ["3500", "6000 duy", "2.500.000", "1.5tr", "800k"].forEach(function(c) {
++    qualityAssertV1_(beLooksLikePriceCellB3_(c), "phải nhận là giá: " + c);
++  });
++  ["1/11", "4", "10pn", "Villa A", ""].forEach(function(c) {
++    qualityAssertV1_(!beLooksLikePriceCellB3_(c), "không được nhận là giá: " + c);
++  });
++  return {success: true, code: "NAMELESS_PRICE_COLUMNS_PASS_B3"};
++}
++
++function testBlankCellUnknownB6() {
++  // Tab 10 ngày: cột C (index 2) ghi giá ở 8 ngày, ngày 9 trắng không giá, ngày 10 tô màu.
++  // Cột D (index 3) không bao giờ ghi giá.
++  var raw = [["Thứ", "Ngày", "Villa A", "Villa B"]], bgs = [["#ffffff", "#ffffff", "#ffffff", "#ffffff"]];
++  var dateIndex = {};
++  for (var d = 1; d <= 10; d++) {
++    raw.push(["T2", String(d), d <= 8 ? "3500" : "", ""]);
++    bgs.push(["#ffffff", "#ffffff", d === 10 ? "#ff0000" : "#ffffff", "#ffffff"]);
++    dateIndex["2026-11-" + (d < 10 ? "0" + d : d)] = d;
++  }
++  function ctx() { return {name: "Tháng 11", raw: raw, display: raw, backgrounds: bgs, notes: [], dateIndexV50: dateIndex}; }
++  var villa = {id: "VL-A", name: "Villa A", bedrooms: ""};
++  var saved = CE_B6_CACHE_.globalMode;
++  try {
++    CE_B6_CACHE_.globalMode = "OFF"; // mặc định
++    var s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO", villa, "");
++    qualityAssertV1_(s.status === "FREE" && s.price === null, "MẶC ĐỊNH: ô trắng không giá = TRỐNG (giá Liên hệ)");
++    s = ceReadCalendarCellStateV34_(ctx(), 1, 2, "AUTO", villa, "");
++    qualityAssertV1_(s.status === "FREE" && s.price === 3500000, "ô trắng có giá => TRỐNG có giá (3500 = 3.500.000đ)");
++    s = ceReadCalendarCellStateV34_(ctx(), 10, 2, "AUTO", villa, "");
++    qualityAssertV1_(s.status === "BUSY", "ô có màu vẫn BẬN");
++    s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO;O_TRANG_KHONG_GIA=CHUA_RO", villa, "");
++    qualityAssertV1_(s.status === "UNKNOWN" && s.unknownReason === "WHITE_NO_PRICE_B6", "bật theo nguồn: ô trắng không giá ở cột thường ghi giá => CHƯA RÕ");
++    s = ceReadCalendarCellStateV34_(ctx(), 9, 3, "AUTO;O_TRANG_KHONG_GIA=CHUA_RO", {id: "VL-B", name: "Villa B"}, "");
++    qualityAssertV1_(s.status === "FREE", "bật theo nguồn nhưng cột không ghi giá: vẫn TRỐNG");
++    CE_B6_CACHE_.globalMode = "ON"; // bật toàn hệ thống
++    s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO", villa, "");
++    qualityAssertV1_(s.status === "UNKNOWN", "bật toàn hệ thống => CHƯA RÕ");
++    s = ceReadCalendarCellStateV34_(ctx(), 9, 2, "AUTO;O_TRANG_KHONG_GIA=TRONG", villa, "");
++    qualityAssertV1_(s.status === "FREE", "nguồn khai TRONG thắng cấu hình toàn hệ thống");
++    qualityAssertV1_(ceB6ParseModeV1_("Chưa rõ") === "ON" && ceB6ParseModeV1_("TRỐNG") === "OFF" && ceB6ParseModeV1_("") === "", "đọc giá trị có dấu");
++
++    // Snapshot: chỉ đọc lại thành chưa rõ khi B6 bật.
++    var row = ["SRC", "VL-A", "Villa A", "", "", 3, "", "m", "s", "f", "h", "F|3500||A2|", "F|3500||A3|", "F|3500||A4|", "F||||", "B"];
++    var sctx = {dateColumns: {"2026-11-01": 11, "2026-11-02": 12, "2026-11-03": 13, "2026-11-04": 14, "2026-11-05": 15}};
++    CE_B6_CACHE_.globalMode = "OFF";
++    qualityAssertV1_(ssRowUsuallyHasPriceB6_(sctx, "VL-A|3", row, {config: "AUTO"}) === false, "snapshot: B6 tắt => không đổi kết quả");
++    sctx = {dateColumns: sctx.dateColumns};
++    qualityAssertV1_(ssRowUsuallyHasPriceB6_(sctx, "VL-A|3", row, {config: "AUTO;O_TRANG_KHONG_GIA=CHUA_RO"}) === true, "snapshot: B6 bật theo nguồn => dòng thường có giá");
++  } finally {
++    CE_B6_CACHE_.globalMode = saved;
++  }
++  qualityAssertV1_(ceSearchLiveErrorReasonV2_(new Error("WHITE_NO_PRICE_B6: x")) === "WHITE_NO_PRICE_B6", "lý do loại WHITE_NO_PRICE_B6");
++  qualityAssertV1_(ssClassifySnapshotErrorV341_("SNAPSHOT_WHITE_NO_PRICE_B6:2026-11-09") === "COVERAGE", "snapshot thiếu giá là COVERAGE");
++  return {success: true, code: "BLANK_CELL_DEFAULT_FREE_PASS_B6"};
++}
++
++/** B5 - tìm căn qua năm mới với tab không ghi năm ("Tháng 12" kéo dài sang 1-5/1). */
++function testNewYearCalendarB5() {
++  function mkSheet(name, data, id) {
++    return {
++      getName: function() { return name; }, isSheetHidden: function() { return false; },
++      getSheetId: function() { return id; }, getIndex: function() { return id; },
++      getLastRow: function() { return data.length; }, getLastColumn: function() { return data[0].length; },
++      getMaxRows: function() { return data.length; }, getMaxColumns: function() { return data[0].length; },
++      getRange: function(r, c, nr, nc) {
++        var slice = function(f) {
++          var out = [];
++          for (var i = 0; i < nr; i++) { var row = []; for (var j = 0; j < nc; j++) row.push(f((data[r - 1 + i] || [])[c - 1 + j])); out.push(row); }
++          return out;
++        };
++        return {
++          getValues: function() { return slice(function(v) { return v === undefined ? "" : v; }); },
++          getDisplayValues: function() { return slice(function(v) { return v === undefined ? "" : String(v); }); },
++          getBackgrounds: function() { return slice(function() { return "#ffffff"; }); },
++          getNotes: function() { return slice(function() { return ""; }); },
++          getMergedRanges: function() { return []; }
++        };
++      }
++    };
++  }
++  var wd = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
++  var dec = [["Thứ", "Ngày", "Villa A"]];
++  for (var d = 1; d <= 31; d++) dec.push([wd[new Date(2026, 11, d).getDay()], String(d), "3500"]);
++  for (var j = 1; j <= 5; j++) dec.push([wd[new Date(2027, 0, j).getDay()], j + "/1", "4000"]);
++  var file = {getSheets: function() { return [mkSheet("Tháng 12", dec, 1)]; }, getId: function() { return "TESTFILE"; },
++    getUrl: function() { return "https://docs.google.com/spreadsheets/d/TESTFILE/edit"; }, getName: function() { return "test"; }};
++  var villa = {id: "VL-TEST", name: "Villa A", sourceColumn: 3, config: "AUTO", source: "test", bedrooms: ""};
++  var ctx = ceCreateSourceContextV30_(file, {source: "test", candidates: 1, maxColumn: 3, requiresFullScan: false});
++  var r = ceReadColumnCalendarV34_(ctx, villa, [new Date(2027, 0, 2), new Date(2027, 0, 3)], 2, false);
++  qualityAssertV1_(r.available === true && r.totalPrice === 8000000, "phải đọc được 2-3/1/2027 từ tab Tháng 12 (giá 4.000.000đ/đêm)");
++  qualityAssertV1_(ceMonthFromSheetNameV1_("Th 11") === 11, "tên tab viết tắt \"Th 11\" phải là tháng 11");
++  qualityAssertV1_(ceCalendarSheetBucketForDateV54_("Tháng 12", new Date(2027, 0, 2)) === "PREVIOUS", "Tháng 12 là tab TRƯỚC của ngày 2/1/2027");
++  qualityAssertV1_(ceCalendarSheetBucketForDateV54_("Tháng 1", new Date(2026, 11, 30)) === "NEXT", "Tháng 1 là tab SAU của ngày 30/12/2026");
++  return {success: true, code: "NEW_YEAR_CALENDAR_PASS_B5"};
++}
++
++/** B7 - xóa dòng theo khối liền nhau. */
++function testBatchedRowDeleteB7() {
++  var calls = [];
++  var sheet = {deleteRows: function(start, count) { calls.push(start + ":" + count); }};
++  var r = beDeleteSheetRowsBatchedB7_(sheet, [10, 11, 12, 13, 20, 21, 5]);
++  qualityAssertV1_(calls.join(",") === "20:2,10:4,5:1", "xóa theo khối từ dưới lên, thực tế=" + calls.join(","));
++  qualityAssertV1_(r.rows === 7 && r.calls === 3, "7 dòng chỉ cần 3 lệnh");
++  calls = [];
++  beDeleteSheetRowsBatchedB7_(sheet, [7, 7, 1]);
++  qualityAssertV1_(calls.join(",") === "7:1", "bỏ dòng trùng và dòng tiêu đề");
++  return {success: true, code: "BATCHED_ROW_DELETE_PASS_B7"};
++}
++
++/** B10 - file bị từ chối quyền được nhớ 15 phút, lần sau báo ngay không mở lại. */
++function testNoAccessCacheB10() {
++  var fileId = "TEST_NO_ACCESS_FILE_B10";
++  ceRememberNoAccessFileB10_(fileId);
++  qualityAssertV1_(ceNoAccessFileCachedB10_(fileId) === true, "file vừa bị chặn phải được nhớ");
++  qualityAssertV1_(ceNoAccessFileCachedB10_("OTHER_FILE") === false, "file khác không bị ảnh hưởng");
++  var msg = "";
++  try { ceOpenSpreadsheetFastV23_("https://docs.google.com/spreadsheets/d/" + fileId + "/edit"); }
++  catch (e) { msg = String(e && e.message || e); }
++  qualityAssertV1_(saClassifyAccessErrorV1_(msg) === "NO_ACCESS", "lỗi từ bộ nhớ đệm vẫn được phân loại NO_ACCESS");
++  // Dọn: xóa file test khỏi bộ nhớ đệm.
++  delete ceNoAccessFilesB10_()[fileId];
++  try { CacheService.getScriptCache().put(CE_NO_ACCESS_CACHE_KEY_B10_, JSON.stringify(ceNoAccessFilesB10_()), CE_NO_ACCESS_CACHE_SECONDS_B10_); } catch (ignore) {}
++  return {success: true, code: "NO_ACCESS_CACHE_PASS_B10"};
++}
++
++/**
++ * Review 10/11 mục 3 - ô có nền màu, không khai báo màu trống => phải BẬN.
++ * Mục 2 - tên màu không hỗ trợ phải được báo.
++ */
++function testColoredCellBusyV1() {
++  var colors = ["#ff0000", "#FF0000", "#ffff00", "#fff2cc", "#f3f3f3", "#fffffe", "#d9d9d9", "#00ff00", "#4a86e8", "#000000", "#8b4513"];
++  var raw = [["Ngày", "Villa"]], bgs = [["#ffffff", "#ffffff"]];
++  colors.forEach(function(col, i) { raw.push([String(i + 1), "3500"]); bgs.push(["#ffffff", col]); });
++  raw.push([String(colors.length + 1), "3500"]); bgs.push(["#ffffff", "#ffffff"]);
++  var c = {name: "Tháng 11", raw: raw, display: raw, backgrounds: bgs, notes: [], dateIndexV50: {}};
++  var villa = {id: "VL-C", name: "Villa"};
++  colors.forEach(function(col, i) {
++    var s = ceReadCalendarCellStateV34_(c, i + 1, 1, "AUTO", villa, "");
++    qualityAssertV1_(s.status === "BUSY", "nền " + col + " không khai báo màu trống phải BẬN, thực tế=" + s.status);
++  });
++  var white = ceReadCalendarCellStateV34_(c, colors.length + 1, 1, "AUTO", villa, "");
++  qualityAssertV1_(white.status === "FREE", "nền trắng #ffffff phải TRỐNG");
++
++  // Ô gộp: ô neo tô đỏ, các ô dưới trả về trắng => vẫn BẬN theo màu vùng gộp.
++  var merged = {name: "T11", raw: [["Ngày", "V"], ["1", ""], ["2", ""]], display: [["Ngày", "V"], ["1", ""], ["2", ""]],
++    backgrounds: [["#ffffff", "#ffffff"], ["#ffffff", "#ff0000"], ["#ffffff", "#ffffff"]], notes: [],
++    mergedCellsV52: {"2|1": {background: "#ff0000", anchorRow: 1, anchorColumn: 1, anchorDisplay: ""}}};
++  qualityAssertV1_(ceReadCalendarCellStateV34_(merged, 2, 1, "AUTO", villa, "").status === "BUSY", "ô thuộc vùng gộp tô đỏ phải BẬN");
++
++  // Ô ngoài vùng đã tải => CHƯA RÕ, không được TRỐNG.
++  var out = ceReadCalendarCellStateV34_(c, 1, 5, "AUTO", villa, "");
++  qualityAssertV1_(out.status === "UNKNOWN" && out.unknownReason === "BACKGROUND_NOT_LOADED", "ô ngoài vùng đã tải phải CHƯA RÕ");
++
++  // Khai báo màu trống: chỉ màu đó TRỐNG, màu khác vẫn BẬN; tên màu lạ không có tác dụng.
++  qualityAssertV1_(ceReadCalendarCellStateV34_(c, 3, 1, "AUTO;FREE_COLOR_GROUPS=VANG", villa, "").status === "FREE", "VANG khai báo trống => ô vàng TRỐNG");
++  qualityAssertV1_(ceReadCalendarCellStateV34_(c, 1, 1, "AUTO;FREE_COLOR_GROUPS=VANG", villa, "").status === "BUSY", "VANG trống nhưng ô đỏ vẫn BẬN");
++  qualityAssertV1_(ceReadCalendarCellStateV34_(c, 11, 1, "AUTO;FREE_COLOR_GROUPS=NAU", villa, "").status === "BUSY", "NAU không hỗ trợ => ô nâu vẫn BẬN");
++
++  var issues = ceFreeColorConfigIssuesV1_("AUTO;FREE_COLOR_GROUPS=VANG,NAU");
++  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_NAME_UNKNOWN" && issues[0].value === "NAU", "phải báo tên màu NAU");
++  issues = ceFreeColorConfigIssuesV1_("AUTO;MÀU_TRỐNG=#ff0");
++  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_HEX_INVALID", "phải báo mã màu 3 ký tự");
++  issues = ceFreeColorConfigIssuesV1_("AUTO;FREE_COLORS=#ffff00;MAU_TRONG=VANG");
++  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_KEY_IGNORED", "phải báo khóa màu bị bỏ qua");
++  qualityAssertV1_(ceFreeColorConfigIssuesV1_("AUTO;NHÓM_MÀU_TRỐNG=Vàng, Xanh lá, #ffff00").length === 0, "tên màu hợp lệ có dấu không bị báo");
++  return {success: true, code: "COLORED_CELL_BUSY_PASS_V1"};
++}
+diff --git a/ScheduleSnapshot.js b/ScheduleSnapshot.js
+index 827a5ca..41ce07b 100644
+--- a/ScheduleSnapshot.js
++++ b/ScheduleSnapshot.js
+@@ -242,6 +242,7 @@ function ssClassifySnapshotErrorV341_(errorMessage) {
+   var msg=String(errorMessage||"");
+   if(msg==="SNAPSHOT_TAIL_SKIPPED_AFTER_DATE_GAP")return "COVERAGE";
+   if(msg.indexOf("SNAPSHOT_DATE_CELL_NOT_FOUND:")===0)return "COVERAGE";
++  if(msg.indexOf("SNAPSHOT_WHITE_NO_PRICE_B6:")===0)return "COVERAGE";
+   return "HARD";
+ }
+ 
+@@ -427,20 +428,6 @@ function ssDecodePartV320_(text) {
+   try { return decodeURIComponent(String(text || "")); } catch (ignore) { return String(text || ""); }
+ }
+ 
+-function ssEncodeNightCellV320_(result) {
+-  result = result || {};
+-  if (result.available === false) return "B";
+-  if (result.available !== true) return "E|" + ssEncodePartV320_("UNKNOWN_RESULT");
+-  var n = result.nightlyPrices && result.nightlyPrices[0] ? result.nightlyPrices[0] : {};
+-  var price = n.price === null || n.price === undefined ? "" : String(Number(n.price));
+-  return [
+-    "F",
+-    price,
+-    ssEncodePartV320_(n.sheet || ""),
+-    ssEncodePartV320_(n.cell || ""),
+-    ssEncodePartV320_(n.sourceLink || "")
+-  ].join("|");
+-}
+ 
+ function ssDecodeNightCellV320_(text) {
+   text = String(text || "");
+@@ -460,24 +447,6 @@ function ssDecodeNightCellV320_(text) {
+   };
+ }
+ 
+-function ssQueueScheduleSourceV320_(source, reason) {
+-  source = source || {};
+-  var sh = ssEnsureScheduleQueueSheetV320_();
+-  var key = ssScheduleSourceKeyV320_(source);
+-  var values = sh.getDataRange().getDisplayValues();
+-  var now = new Date().toISOString();
+-  for (var r = 1; r < values.length; r++) {
+-    if (String(values[r][0] || "") === key) {
+-      sh.getRange(r+1,1,1,8).setValues([[
+-        key, source.source || values[r][1] || "", source.city || values[r][2] || "",
+-        source.link || values[r][3] || "", "DIRTY", now, values[r][6] || "", reason || values[r][7] || ""
+-      ]]);
+-      return {success:true,key:key,updated:true};
+-    }
+-  }
+-  sh.appendRow([key,source.source || "",source.city || "",source.link || "","DIRTY",now,"",reason || ""]);
+-  return {success:true,key:key,updated:false};
+-}
+ 
+ function queueAllScheduleSnapshotsV320() {
+   var sources = opsListMasterSourcesV312_(true).sources || [];
+@@ -784,6 +753,10 @@ function ssReadSingleNightCellV320_(sourceContext, villa, date) {
+   var loc = ceFindVillaNightCellV34_(sourceContext, villa, date, "", 0);
+   if (!loc) throw new Error("SNAPSHOT_DATE_CELL_NOT_FOUND:" + ssDateKeyV320_(date));
+   var state = ceReadCalendarCellStateV34_(loc.context, loc.row, loc.column, villa.config, villa, loc.optionLabel || "");
++  if (state && state.status === "UNKNOWN" && state.unknownReason === "WHITE_NO_PRICE_B6") {
++    // B6: ô trống không giá = CHƯA RÕ. Là thiếu dữ liệu của nguồn, không phải lỗi đọc.
++    throw new Error("SNAPSHOT_WHITE_NO_PRICE_B6:" + ssDateKeyV320_(date));
++  }
+   if (!state || state.status === "UNKNOWN") {
+     throw new Error("SNAPSHOT_UNKNOWN_STATE:" + ssDateKeyV320_(date));
+   }
+@@ -1569,6 +1542,11 @@ function ssTryReadVillaSnapshotV320_(ctx,villa,nights,guestCount) {
+       ctx.misses++;
+       return {usable:false,reason:"SNAPSHOT_" + state.status};
+     }
++    if ((state.price === null || !Number.isFinite(state.price)) && ssRowUsuallyHasPriceB6_(ctx, key, row, villa)) {
++      // B6: snapshot cũ (trước bản B6) lưu ô trống-không-giá là FREE. Đọc lại như CHƯA RÕ.
++      ctx.misses++;
++      return {usable:false,reason:"SNAPSHOT_WHITE_NO_PRICE_B6",blockedDate:dateKey};
++    }
+     if (state.price === null || !Number.isFinite(state.price)) complete = false;
+     else total += state.price;
+     nightly.push({
+@@ -1586,6 +1564,23 @@ function ssTryReadVillaSnapshotV320_(ctx,villa,nights,guestCount) {
+   return {usable:true,reader:"SNAPSHOT_V320",sourceStatus:sourceStatus||"OK",readResult:{available:true,priceStatus:complete?"KNOWN":"CONTACT",totalPrice:complete?total:null,totalPriceText:complete?ceFormatMoney_(total):"Liên hệ báo giá",nightlyPrices:nightly,sourceLinks:nightly.map(function(x){return x.sourceLink;}),selectedOption:option.label || ""}};
+ }
+ 
++/** B6 (mặc định tắt) - dòng snapshot thường có giá: >= 3 ô FREE có giá và >= 20% số ô FREE. */
++function ssRowUsuallyHasPriceB6_(ctx, key, row, villa) {
++  if (typeof ceB6EnabledForConfigV1_ !== "function" || !ceB6EnabledForConfigV1_(villa && villa.config || "")) return false;
++  ctx.rowPricedCacheB6 = ctx.rowPricedCacheB6 || {};
++  if (Object.prototype.hasOwnProperty.call(ctx.rowPricedCacheB6, key)) return ctx.rowPricedCacheB6[key];
++  var free = 0, priced = 0;
++  Object.keys(ctx.dateColumns || {}).forEach(function(dk) {
++    var st = ssDecodeNightCellV320_(row[ctx.dateColumns[dk]]);
++    if (st.status !== "FREE") return;
++    free++;
++    if (st.price !== null && Number.isFinite(st.price)) priced++;
++  });
++  var result = priced >= 3 && priced >= Math.ceil(free * 0.2);
++  ctx.rowPricedCacheB6[key] = result;
++  return result;
++}
++
+ function getScheduleSnapshotSummaryV320() {
+   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EHOME_SCHEDULE_SNAPSHOT_V320.SHEET);
+   var queue = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EHOME_SCHEDULE_SNAPSHOT_V320.QUEUE_SHEET);
+diff --git a/SearchEngine.js b/SearchEngine.js
+index 112cc0e..a38ee56 100644
+--- a/SearchEngine.js
++++ b/SearchEngine.js
+@@ -755,7 +755,7 @@ function ceBuildFastCandidatePageResponseV626_(payload, startCursor, nextCandida
+ 
+ function ceSearchLiveErrorReasonV2_(error){
+   var message=String(error&&error.message?error.message:error||"").toUpperCase();
+-  var known=["VILLA_COLUMN_NOT_FOUND","DATE_NOT_FOUND","DATE_COLUMN_NOT_FOUND","DEADLINE_EXCEEDED","SOURCE_READ_FAILED","PERMISSION_DENIED","SNAPSHOT_DATE_CELL_NOT_FOUND","SNAPSHOT_UNKNOWN_STATE","NO_CALENDAR_ACTIVITY"];
++  var known=["WHITE_NO_PRICE_B6","VILLA_COLUMN_NOT_FOUND","DATE_NOT_FOUND","DATE_COLUMN_NOT_FOUND","DEADLINE_EXCEEDED","SOURCE_READ_FAILED","PERMISSION_DENIED","SNAPSHOT_DATE_CELL_NOT_FOUND","SNAPSHOT_UNKNOWN_STATE","NO_CALENDAR_ACTIVITY"];
+   for(var i=0;i<known.length;i++) if(message.indexOf(known[i])>=0) return known[i];
+   return "LIVE_READ_FAILED";
+ }
+@@ -1115,13 +1115,22 @@ function ceBuildFastSourcePlansV23_(villas, startCursor) {
+ function ceOpenSpreadsheetFastV23_(url) {
+   var text = String(url || "");
+   var match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
++  // Mục 10: nguồn đã biết là .xlsx => mở thẳng bản tạm, không thử openById (chắc chắn lỗi).
++  if (match && match[1] && typeof beIsKnownXlsxSourceV1_ === "function" && beIsKnownXlsxSourceV1_(match[1])) {
++    return beOpenSourceSpreadsheetV_FIX(text);
++  }
+   if (match && match[1]) {
++    // B10: file vừa bị từ chối quyền trong 15 phút qua => báo ngay, không mở lại (tiết kiệm 1-3 giây/nguồn).
++    if (ceNoAccessFileCachedB10_(match[1])) {
++      throw new Error("PERMISSION_DENIED (cached 15 phút): You do not have permission to access the requested document. fileId=" + match[1]);
++    }
+     try {
+       return SpreadsheetApp.openById(match[1]);
+     } catch (e) {
+       var msg = String(e && e.message ? e.message : e);
+       var classify = saClassifyAccessErrorV1_(msg);
+       if (classify === "NO_ACCESS") {
++        ceRememberNoAccessFileB10_(match[1]);
+         throw e;  // Báo lỗi ngay, không thử openByUrl (tránh gọi API 2 lần)
+       }
+       // Lỗi tạm thời: thử openByUrl
+@@ -1130,6 +1139,41 @@ function ceOpenSpreadsheetFastV23_(url) {
+   return beOpenSourceSpreadsheetV_FIX(text);  // FIX: nguồn .xlsx convert tạm, Google Sheet giữ nguyên
+ }
+ 
++/*
++ * B10 - Danh sách file bị từ chối quyền gần đây: 1 khóa CacheService (15 phút),
++ * đọc 1 lần mỗi lượt chạy. Khi chủ nguồn cấp lại quyền, tối đa 15 phút sau đọc lại được.
++ */
++var CE_NO_ACCESS_FILES_B10_ = null;
++var CE_NO_ACCESS_CACHE_KEY_B10_ = "BE_NO_ACCESS_FILES_B10";
++var CE_NO_ACCESS_CACHE_SECONDS_B10_ = 900;
++
++function ceNoAccessFilesB10_() {
++  if (CE_NO_ACCESS_FILES_B10_) return CE_NO_ACCESS_FILES_B10_;
++  CE_NO_ACCESS_FILES_B10_ = {};
++  try {
++    var raw = CacheService.getScriptCache().get(CE_NO_ACCESS_CACHE_KEY_B10_);
++    var data = raw ? JSON.parse(raw) : {};
++    var now = new Date().getTime();
++    Object.keys(data || {}).forEach(function(id) {
++      if (Number(data[id]) > now) CE_NO_ACCESS_FILES_B10_[id] = Number(data[id]);
++    });
++  } catch (ignore) {}
++  return CE_NO_ACCESS_FILES_B10_;
++}
++
++function ceNoAccessFileCachedB10_(fileId) {
++  var until = ceNoAccessFilesB10_()[String(fileId || "")];
++  return !!until && until > new Date().getTime();
++}
++
++function ceRememberNoAccessFileB10_(fileId) {
++  try {
++    var map = ceNoAccessFilesB10_();
++    map[String(fileId || "")] = new Date().getTime() + CE_NO_ACCESS_CACHE_SECONDS_B10_ * 1000;
++    CacheService.getScriptCache().put(CE_NO_ACCESS_CACHE_KEY_B10_, JSON.stringify(map), CE_NO_ACCESS_CACHE_SECONDS_B10_);
++  } catch (ignore) {}
++}
++
+ function ceBuildFastSearchTimingV23_(sourceCache, sourceStats, masterReadMs, elapsedMs) {
+   var sources = [];
+   var sheetLoads = 0;
+@@ -1261,53 +1305,6 @@ function ceCompareVillasBestCapacityV332_(a, b, guestCount, shuffleSeed, priorit
+   );
+ }
+ 
+-function ceSortBestCapacityFirstV332_(results, shuffleSeed) {
+-  (results || []).sort(function(a, b) {
+-    var rankA = ceBestCapacityRankV332_(a);
+-    var rankB = ceBestCapacityRankV332_(b);
+-
+-    if (rankA !== rankB) return rankA - rankB;
+-
+-    var differenceA = Number(a && a.capacityDifference);
+-    var differenceB = Number(b && b.capacityDifference);
+-
+-    // Căn dư khách: dư ít đứng trước.
+-    if (rankA === 1 && differenceA !== differenceB) {
+-      return differenceA - differenceB;
+-    }
+-
+-    // Căn thiếu khách: thiếu ít đứng trước.
+-    if (rankA === 3 && differenceA !== differenceB) {
+-      return differenceB - differenceA;
+-    }
+-
+-    // BEST V3.4.0: cùng mức phù hợp thì trộn để mỗi lượt search không
+-    // luôn hiện đúng một nhóm căn. PRICE_ASC/DESC vẫn do PriceEngine xử lý.
+-    if (shuffleSeed) {
+-      var shuffleA = ceStableShuffleKeyV340_(shuffleSeed, a);
+-      var shuffleB = ceStableShuffleKeyV340_(shuffleSeed, b);
+-      if (shuffleA !== shuffleB) return shuffleA < shuffleB ? -1 : 1;
+-    }
+-
+-    // Không có seed (API legacy) thì giữ hành vi cũ: giá thấp hơn trước.
+-    var priceA = ceSortableTotalPriceV332_(a);
+-    var priceB = ceSortableTotalPriceV332_(b);
+-    if (priceA === null && priceB !== null) return 1;
+-    if (priceA !== null && priceB === null) return -1;
+-    if (priceA !== null && priceA !== priceB) return priceA - priceB;
+-
+-    var sourceCompare = String(a && a.source || "").localeCompare(
+-      String(b && b.source || ""),
+-      "vi"
+-    );
+-    if (sourceCompare !== 0) return sourceCompare;
+-
+-    return String(a && a.name || "").localeCompare(
+-      String(b && b.name || ""),
+-      "vi"
+-    );
+-  });
+-}
+ 
+ /**
+  * V3.4.3 HIGH RECALL CAPACITY RANK
+@@ -1340,13 +1337,6 @@ function ceBestCapacityRankByFitV332_(fit) {
+   return difference > 0 ? 1 : 3;
+ }
+ 
+-function ceSortableTotalPriceV332_(villa) {
+-  var value = villa && villa.totalPrice;
+-  if (value === null || value === undefined || value === "") return null;
+-
+-  var price = Number(value);
+-  return Number.isFinite(price) ? price : null;
+-}
+ 
+ function ceCapacityFit_(standardValue, guestCount, minValue, maxValue) {
+   var guests = Number(guestCount || 0);
+@@ -1411,8 +1401,6 @@ function ceCapacityFit_(standardValue, guestCount, minValue, maxValue) {
+ }
+ 
+ 
+-
+-
+ /**
+  * V3.4.4 BALANCED HIGH-RECALL candidate order.
+  *
+@@ -1628,25 +1616,6 @@ function ceStableShuffleKeyV340_(seed, villa) {
+   return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/g, "").slice(0, 18);
+ }
+ 
+-function testSearchShuffleV340_() {
+-  var list = [
+-    {id:"A",name:"A",source:"S",standard:10},
+-    {id:"B",name:"B",source:"S",standard:10},
+-    {id:"C",name:"C",source:"S",standard:10},
+-    {id:"D",name:"D",source:"S",standard:12}
+-  ];
+-  var one = list.slice().sort(function(a,b){
+-    return ceCompareVillasBestCapacityV332_(a,b,10,"seed_one");
+-  }).map(function(x){ return x.id; }).join(",");
+-  var two = list.slice().sort(function(a,b){
+-    return ceCompareVillasBestCapacityV332_(a,b,10,"seed_two");
+-  }).map(function(x){ return x.id; }).join(",");
+-  var pass = one !== two && one.indexOf("D") > 1 && two.indexOf("D") > 1;
+-  if (!pass) throw new Error("SEARCH_SHUFFLE_V340_FAILED: " + one + " / " + two);
+-  Logger.log(JSON.stringify({code:"SEARCH_SHUFFLE_PASS_V340",one:one,two:two}));
+-  return {success:true,one:one,two:two};
+-}
+-
+ 
+ function testSearchCapacityRangeV4220() {
+   var inside = ceCapacityFit_("8-10", 9);
+diff --git a/SearchTraceDoctorV1.js b/SearchTraceDoctorV1.js
+index 5ec577c..c459615 100644
+--- a/SearchTraceDoctorV1.js
++++ b/SearchTraceDoctorV1.js
+@@ -77,13 +77,6 @@ function stMatchesSelectorV11_(x,q){
+   return id === q || name === q || source === q;
+ }
+ 
+-function stMatchesSelectorLooseV12_(x,q){
+-  var id = stNormalizeV1_(x && x.id);
+-  var name = stNormalizeV1_(x && x.name);
+-  var source = stNormalizeV1_(x && x.source);
+-  if (!q) return false;
+-  return stMatchesSelectorV11_(x,q) || id.indexOf(q) >= 0 || name.indexOf(q) >= 0 || source.indexOf(q) >= 0;
+-}
+ 
+ function stStaticCandidateContextV11_(options){
+   options = options || {};
+diff --git a/SheetMonthNormalizer.js b/SheetMonthNormalizer.js
+index e0364cd..07afea6 100644
+--- a/SheetMonthNormalizer.js
++++ b/SheetMonthNormalizer.js
+@@ -75,6 +75,8 @@ function ceNormalizeMonthSheetTextV1_(text) {
+     s = s.replace(re, "$1thang " + e[1]);
+   });
+ 
++  // B5: "th 11", "th.11", "th01" (viết tắt "Tháng" của nhiều nguồn) => "thang 11"
++  s = s.replace(/(^|[^a-z])th[\s._\-:,]*0?(1[0-2]|[1-9])(?!\d)/g, "$1thang $2");
+   // "thang.10", "thang_10", "thang-10", "thang10", "thg 10", "month 10" => "thang 10"
+   s = s.replace(/(^|[^a-z])(thang|thg|month)[\s._\-:,]*0?(1[0-2]|[1-9])(?!\d)/g, "$1thang $3");
+   // "t.10", "t-10", "t_10" (chu T don le + dau ngan) => "thang 10"
+diff --git a/SourceAccess.js b/SourceAccess.js
+index 855f8a3..2f20ec6 100644
+--- a/SourceAccess.js
++++ b/SourceAccess.js
+@@ -41,18 +41,6 @@ function saClassifyAccessErrorV1_(message) {
+   return "OTHER";
+ }
+ 
+-/**
+- * Lấy MASTER sheet
+- */
+-function saGetMasterSheetV1_() {
+-  try {
+-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+-    return ss.getSheetByName(EHOME_SOURCE_ACCESS_V1.MASTER_TAB_NAME);
+-  } catch (e) {
+-    Logger.log("[SourceAccess] Error getting MASTER sheet: " + e.message);
+-    return null;
+-  }
+-}
+ 
+ /**
+  * Lấy hoặc tạo tab NO_ACCESS_SOURCES
+@@ -90,6 +78,7 @@ function saGetNoAccessTabV1_() {
+     }
+ 
+     saNormalizeNoAccessTabV1_(tab);
++    saRefreshNoAccessMasterRowsV1_(tab);
+     return tab;
+   } catch (e) {
+     Logger.log("[SourceAccess] Error getting NO_ACCESS tab: " + e.message);
+@@ -98,6 +87,40 @@ function saGetNoAccessTabV1_() {
+ }
+ 
+ var saNormalizedThisRunV1_ = false;
++var saMasterRowsRefreshedV1_ = false;
++
++/**
++ * B10 - Cột "Dòng MASTER" luôn tính lại từ ID (cột B), mỗi lượt chạy 1 lần.
++ * Bản cũ chỉ ghi số dòng lúc thêm nên lệch khi MASTER chèn/xóa dòng.
++ * ID không còn trong MASTER => 0. Không đụng cột Ghi chú.
++ */
++function saRefreshNoAccessMasterRowsV1_(tab) {
++  if (saMasterRowsRefreshedV1_) return 0;
++  saMasterRowsRefreshedV1_ = true;
++  try {
++    var last = tab.getLastRow();
++    if (last < 2) return 0;
++    var vals = tab.getRange(2, EHOME_SOURCE_ACCESS_V1.COL_MASTER_ROW, last - 1, 2).getValues();
++    var rowById = {};
++    (opsListMasterSourcesV312_(false).sources || []).forEach(function (m) {
++      if (m.id) rowById[String(m.id).trim()] = Number(m.row || 0);
++    });
++    var changed = 0;
++    var colA = vals.map(function (r) {
++      var id = String(r[1] == null ? "" : r[1]).trim();
++      if (!id) return [r[0]];
++      var want = rowById[id] || 0;
++      if (Number(r[0] || 0) !== want) changed++;
++      return [want];
++    });
++    if (changed) tab.getRange(2, EHOME_SOURCE_ACCESS_V1.COL_MASTER_ROW, colA.length, 1).setValues(colA);
++    if (changed) Logger.log("[SourceAccess] B10: cap nhat " + changed + " o 'Dong MASTER' theo ID");
++    return changed;
++  } catch (e) {
++    Logger.log("[SourceAccess] B10 refresh master rows loi: " + (e && e.message ? e.message : e));
++    return 0;
++  }
++}
+ var saNoAccessIdsCacheV1_ = null;
+ 
+ function saNoAccessHeadersV1_() {
+@@ -274,12 +297,6 @@ function saGetNoAccessSourceIdsV1_() {
+   }
+ }
+ 
+-/**
+- * Lấy số lượng NO_ACCESS sources
+- */
+-function saGetNoAccessCountV1_() {
+-  return saGetNoAccessSourceIdsV1_().length;
+-}
+ 
+ /**
+  * Đọc source từ MASTER sheet bằng source.id
+@@ -320,10 +337,3 @@ function saMarkRecoveredIfNeededV1_(source) {
+   }
+ }
+ 
+-/**
+- * Kiểm tra xem source có đang là NO_ACCESS không
+- */
+-function saIsNoAccessSourceV1_(sourceId) {
+-  var ids = saGetNoAccessSourceIdsV1_();
+-  return ids.indexOf(sourceId) >= 0;
+-}
+diff --git a/SourceXlsxOpen.js b/SourceXlsxOpen.js
+new file mode 100644
+index 0000000..feeda20
+--- /dev/null
++++ b/SourceXlsxOpen.js
+@@ -0,0 +1,173 @@
++/**
++ * SourceXlsxOpen.js (trước đây SourceXlsxOpenV_FIX.js) - đọc nguồn là file Excel .xlsx trên Drive.
++ *
++ * SpreadsheetApp chỉ mở được Google Sheet gốc, nên nguồn .xlsx (vd Pontus) phải chuyển
++ * tạm sang Google Sheet (Drive advanced service v2, convert:true) rồi mới đọc.
++ *
++ * Review 10/11 mục 10 - bản cũ chuyển đổi LẠI mỗi lần mở (mỗi build, mỗi lượt tìm căn,
++ * mỗi lần dựng snapshot): chậm vài giây/lần và mỗi lần thêm 1 file vào thùng rác Drive.
++ * Bản này:
++ *  1. Google Sheet thường: mở như cũ, không đổi hành vi.
++ *  2. Nguồn đã biết là .xlsx: bỏ qua lần thử openByUrl (vốn chắc chắn lỗi).
++ *  3. DÙNG LẠI bản tạm nếu file .xlsx gốc chưa đổi (so thời gian sửa trên Drive).
++ *     Chỉ chuyển đổi lại khi file gốc đổi hoặc bản tạm mất; bản tạm cũ đưa vào thùng rác.
++ *  4. Trong cùng 1 lượt chạy, mỗi nguồn .xlsx chỉ mở 1 lần.
++ *  5. Khóa (LockService) khi chuyển đổi để 2 lượt chạy song song không tạo 2 bản tạm.
++ * Bản tạm tên "EHOME_TMP_<fileId>", ID lưu ở Script Property XLSX_TMP_V_FIX_<fileId>
++ * dạng JSON {tmpId, srcUpdated}. Giá trị cũ (chỉ có tmpId) vẫn đọc được.
++ *
++ * CHƯA CHẠY THẬT: sau khi push, chạy testXlsxSourceOpenV_FIX() 2 lần trên nguồn pontus.
++ * Lần 1: XLSX_SOURCE_CONVERTED_V_FIX (hoặc REUSED). Lần 2 phải là XLSX_SOURCE_TMP_REUSED_V1.
++ */
++
++var XLSX_SRC_MIME_V_FIX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
++var XLSX_SRC_PROP_PREFIX_V_FIX = "XLSX_TMP_V_FIX_";
++var XLSX_OPENED_THIS_RUN_V1_ = {};
++var XLSX_KNOWN_IDS_V1_ = null;
++
++/** File ID nào đã biết là nguồn .xlsx (có bản tạm). Đọc danh sách khóa 1 lần mỗi lượt chạy. */
++function beIsKnownXlsxSourceV1_(fileId) {
++  if (!fileId) return false;
++  if (XLSX_KNOWN_IDS_V1_ === null) {
++    XLSX_KNOWN_IDS_V1_ = {};
++    try {
++      (PropertiesService.getScriptProperties().getKeys() || []).forEach(function(k) {
++        if (String(k).indexOf(XLSX_SRC_PROP_PREFIX_V_FIX) === 0) XLSX_KNOWN_IDS_V1_[String(k).slice(XLSX_SRC_PROP_PREFIX_V_FIX.length)] = true;
++      });
++    } catch (ignore) {}
++  }
++  return !!XLSX_KNOWN_IDS_V1_[fileId];
++}
++
++function beExtractDriveFileIdV_FIX(url) {
++  var text = String(url || "");
++  var m = text.match(/\/(?:spreadsheets\/d|file\/d|document\/d)\/([a-zA-Z0-9_-]+)/);
++  if (m && m[1]) return m[1];
++  var m2 = text.match(/[?&]id=([a-zA-Z0-9_-]+)/);
++  return m2 ? m2[1] : "";
++}
++
++/** Đọc giá trị property: JSON mới {tmpId, srcUpdated} hoặc chuỗi tmpId cũ. */
++function beParseXlsxTmpRecordV1_(raw) {
++  raw = String(raw || "").trim();
++  if (!raw) return null;
++  if (raw.charAt(0) === "{") {
++    try { var o = JSON.parse(raw); return o && o.tmpId ? {tmpId: String(o.tmpId), srcUpdated: Number(o.srcUpdated || 0)} : null; }
++    catch (e) { return null; }
++  }
++  return {tmpId: raw, srcUpdated: 0};
++}
++
++/** Thuần, test được: REUSE khi bản tạm còn và file gốc chưa đổi kể từ lần chuyển đổi. */
++function beXlsxTempDecisionV1_(record, srcUpdatedMs, tmpExists) {
++  if (!record || !record.tmpId || !tmpExists) return "CONVERT";
++  if (!(Number(record.srcUpdated) > 0)) return "CONVERT";
++  return Number(srcUpdatedMs || 0) > Number(record.srcUpdated) ? "CONVERT" : "REUSE";
++}
++
++/**
++ * Mở nguồn theo link. Google Sheet: như SpreadsheetApp.openByUrl. File .xlsx: bản tạm.
++ * Ném lại lỗi gốc nếu không phải .xlsx hoặc không đọc được file.
++ */
++function beOpenSourceSpreadsheetV_FIX(url) {
++  var fileId = beExtractDriveFileIdV_FIX(url);
++  if (fileId && XLSX_OPENED_THIS_RUN_V1_[fileId]) return XLSX_OPENED_THIS_RUN_V1_[fileId];
++  // Đã biết là .xlsx từ lần trước => không thử openByUrl (chắc chắn lỗi, tốn ~1 giây).
++  if (beIsKnownXlsxSourceV1_(fileId)) {
++    try { return beOpenXlsxAsTempSheetV_FIX_(fileId); } catch (knownXlsxError) { /* thử lại đường thường bên dưới */ }
++  }
++  try {
++    return SpreadsheetApp.openByUrl(url);
++  } catch (openError) {
++    if (!fileId) throw openError;
++    var mime = "";
++    try {
++      mime = String(DriveApp.getFileById(fileId).getMimeType() || "");
++    } catch (driveError) {
++      throw openError;
++    }
++    if (mime !== XLSX_SRC_MIME_V_FIX) throw openError;
++    return beOpenXlsxAsTempSheetV_FIX_(fileId);
++  }
++}
++
++function beOpenXlsxAsTempSheetV_FIX_(fileId) {
++  var props = PropertiesService.getScriptProperties();
++  var key = XLSX_SRC_PROP_PREFIX_V_FIX + fileId;
++  var source = DriveApp.getFileById(fileId);
++  if (String(source.getMimeType() || "") !== XLSX_SRC_MIME_V_FIX) throw new Error("NOT_XLSX_SOURCE:" + fileId);
++  var srcUpdated = source.getLastUpdated().getTime();
++
++  var record = beParseXlsxTmpRecordV1_(props.getProperty(key));
++  var tmpExists = false;
++  if (record && record.tmpId) {
++    try { tmpExists = !DriveApp.getFileById(record.tmpId).isTrashed(); } catch (e) { tmpExists = false; }
++  }
++  if (beXlsxTempDecisionV1_(record, srcUpdated, tmpExists) === "REUSE") {
++    var reused = SpreadsheetApp.openById(record.tmpId);
++    XLSX_OPENED_THIS_RUN_V1_[fileId] = reused;
++    Logger.log(JSON.stringify({code: "XLSX_SOURCE_TMP_REUSED_V1", sourceFileId: fileId, tmpId: record.tmpId}));
++    return reused;
++  }
++
++  var lock = LockService.getScriptLock();
++  var locked = false;
++  try { locked = lock.tryLock(30000); } catch (ignoreLock) {}
++  try {
++    // Lượt chạy khác có thể vừa chuyển đổi xong trong lúc chờ khóa.
++    var again = beParseXlsxTmpRecordV1_(props.getProperty(key));
++    if (again && again.tmpId && (!record || again.tmpId !== record.tmpId)) {
++      var fresh = false;
++      try { fresh = !DriveApp.getFileById(again.tmpId).isTrashed(); } catch (e2) { fresh = false; }
++      if (beXlsxTempDecisionV1_(again, srcUpdated, fresh) === "REUSE") {
++        var other = SpreadsheetApp.openById(again.tmpId);
++        XLSX_OPENED_THIS_RUN_V1_[fileId] = other;
++        return other;
++      }
++    }
++    var blob = source.getBlob();
++    var resource = {title: "EHOME_TMP_" + fileId, mimeType: MimeType.GOOGLE_SHEETS};
++    var tmp = Drive.Files.insert(resource, blob, {convert: true});
++    props.setProperty(key, JSON.stringify({tmpId: tmp.id, srcUpdated: srcUpdated}));
++    if (XLSX_KNOWN_IDS_V1_) XLSX_KNOWN_IDS_V1_[fileId] = true;
++    if (record && record.tmpId && record.tmpId !== tmp.id) {
++      try { DriveApp.getFileById(record.tmpId).setTrashed(true); } catch (e3) { /* bản cũ đã mất thì bỏ qua */ }
++    }
++    Logger.log(JSON.stringify({code: "XLSX_SOURCE_CONVERTED_V_FIX", sourceFileId: fileId, tmpId: tmp.id,
++      reason: !record ? "FIRST_TIME" : (!tmpExists ? "TMP_MISSING" : "SOURCE_CHANGED")}));
++    var opened = SpreadsheetApp.openById(tmp.id);
++    XLSX_OPENED_THIS_RUN_V1_[fileId] = opened;
++    return opened;
++  } finally {
++    if (locked) { try { lock.releaseLock(); } catch (ignoreRelease) {} }
++  }
++}
++
++/** Test thủ công: chạy trong Apps Script editor sau khi push, 2 lần. Đọc nguồn "pontus" trong MASTER. */
++function testXlsxSourceOpenV_FIX() {
++  if (typeof opsFindSourceV312_ !== "function") throw new Error("OPS_SOURCE_HELPER_NOT_AVAILABLE");
++  var source = opsFindSourceV312_("pontus");
++  if (!source || !source.link) throw new Error("PONTUS_SOURCE_NOT_FOUND");
++  var started = new Date().getTime();
++  var file = beOpenSourceSpreadsheetV_FIX(source.link);
++  var names = file.getSheets().map(function (s) { return s.getName(); });
++  var result = {success: true, name: file.getName(), openedId: file.getId(), sheets: names, elapsedMs: new Date().getTime() - started};
++  Logger.log(JSON.stringify({code: "XLSX_SOURCE_OPEN_PASS_V_FIX", result: result}));
++  return result;
++}
++
++/** Test thuần quyết định dùng lại / chuyển đổi bản tạm. */
++function testXlsxTempDecisionV1() {
++  var cases = [
++    [beXlsxTempDecisionV1_(null, 100, false), "CONVERT"],
++    [beXlsxTempDecisionV1_({tmpId: "T", srcUpdated: 100}, 100, true), "REUSE"],
++    [beXlsxTempDecisionV1_({tmpId: "T", srcUpdated: 100}, 200, true), "CONVERT"],
++    [beXlsxTempDecisionV1_({tmpId: "T", srcUpdated: 100}, 100, false), "CONVERT"],
++    [beXlsxTempDecisionV1_(beParseXlsxTmpRecordV1_("OLD_TMP_ID"), 100, true), "CONVERT"],
++    [JSON.stringify(beParseXlsxTmpRecordV1_('{"tmpId":"A","srcUpdated":5}')), '{"tmpId":"A","srcUpdated":5}']
++  ];
++  cases.forEach(function(c, i) { if (c[0] !== c[1]) throw new Error("XLSX_TEMP_DECISION_FAIL case " + (i + 1) + ": " + c[0]); });
++  var r = {success: true, code: "XLSX_TEMP_DECISION_PASS_V1", cases: cases.length};
++  Logger.log(JSON.stringify(r));
++  return r;
++}
+diff --git a/SourceXlsxOpenV_FIX.js b/SourceXlsxOpenV_FIX.js
+deleted file mode 100644
+index 4900d82..0000000
+--- a/SourceXlsxOpenV_FIX.js
++++ /dev/null
+@@ -1,81 +0,0 @@
+-/**
+- * SourceXlsxOpenV_FIX.js — FIX (24/10, đợt bổ sung)
+- *
+- * Mục đích: cho phép app đọc nguồn là file Excel .xlsx đang nằm trên Drive.
+- * SpreadsheetApp.openByUrl chỉ mở được Google Sheet gốc, nên trước đây nguồn .xlsx
+- * (ví dụ Pontus) lỗi khi đọc.
+- *
+- * Cách làm:
+- *  1. Vẫn thử SpreadsheetApp.openByUrl trước. Google Sheet không đổi hành vi.
+- *  2. Chỉ khi mở lỗi VÀ file thật sự là .xlsx: convert tạm sang Google Sheet
+- *     (Drive advanced service v2, insert + convert:true), rồi mở bản tạm.
+- *  3. Mỗi nguồn chỉ giữ 1 bản tạm. Lần convert sau sẽ xóa bản tạm cũ.
+- *     ID bản tạm lưu trong Script Properties theo key XLSX_TMP_V_FIX_<fileId>.
+- *  4. Bản tạm tên "EHOME_TMP_<fileId>" nằm trong Drive của tài khoản chạy script.
+- *
+- * Yêu cầu: appsscript.json có enabledAdvancedServices Drive v2 (đã thêm trong bản này).
+- * Rủi ro: lần convert đầu tiên chưa chạy thật trên Apps Script, cần chạy
+- * testXlsxSourceOpenV_FIX() sau khi push để xác nhận.
+- */
+-
+-var XLSX_SRC_MIME_V_FIX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+-var XLSX_SRC_PROP_PREFIX_V_FIX = "XLSX_TMP_V_FIX_";
+-
+-function beExtractDriveFileIdV_FIX(url) {
+-  var text = String(url || "");
+-  var m = text.match(/\/(?:spreadsheets\/d|file\/d|document\/d)\/([a-zA-Z0-9_-]+)/);
+-  if (m && m[1]) return m[1];
+-  var m2 = text.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+-  return m2 ? m2[1] : "";
+-}
+-
+-/**
+- * Mở nguồn theo link. Giống SpreadsheetApp.openByUrl, nhưng nếu file là .xlsx thì convert tạm.
+- * Ném lại lỗi gốc nếu không phải .xlsx hoặc không đọc được file.
+- */
+-function beOpenSourceSpreadsheetV_FIX(url) {
+-  try {
+-    return SpreadsheetApp.openByUrl(url);
+-  } catch (openError) {
+-    var fileId = beExtractDriveFileIdV_FIX(url);
+-    if (!fileId) throw openError;
+-    var mime = "";
+-    try {
+-      mime = String(DriveApp.getFileById(fileId).getMimeType() || "");
+-    } catch (driveError) {
+-      throw openError;
+-    }
+-    if (mime !== XLSX_SRC_MIME_V_FIX) throw openError;
+-    return beOpenXlsxAsTempSheetV_FIX_(fileId);
+-  }
+-}
+-
+-function beOpenXlsxAsTempSheetV_FIX_(fileId) {
+-  var props = PropertiesService.getScriptProperties();
+-  var key = XLSX_SRC_PROP_PREFIX_V_FIX + fileId;
+-
+-  var oldTmpId = props.getProperty(key);
+-  if (oldTmpId) {
+-    try { DriveApp.getFileById(oldTmpId).setTrashed(true); } catch (e) { /* bản cũ đã mất thì bỏ qua */ }
+-  }
+-
+-  var blob = DriveApp.getFileById(fileId).getBlob();
+-  var resource = { title: "EHOME_TMP_" + fileId, mimeType: MimeType.GOOGLE_SHEETS };
+-  var tmp = Drive.Files.insert(resource, blob, { convert: true });
+-
+-  props.setProperty(key, tmp.id);
+-  Logger.log(JSON.stringify({ code: "XLSX_SOURCE_CONVERTED_V_FIX", sourceFileId: fileId, tmpId: tmp.id }));
+-  return SpreadsheetApp.openById(tmp.id);
+-}
+-
+-/** Test thủ công: chạy trong Apps Script editor sau khi push. Đọc nguồn "pontus" trong MASTER. */
+-function testXlsxSourceOpenV_FIX() {
+-  if (typeof opsFindSourceV312_ !== "function") throw new Error("OPS_SOURCE_HELPER_NOT_AVAILABLE");
+-  var source = opsFindSourceV312_("pontus");
+-  if (!source || !source.link) throw new Error("PONTUS_SOURCE_NOT_FOUND");
+-  var file = beOpenSourceSpreadsheetV_FIX(source.link);
+-  var names = file.getSheets().map(function (s) { return s.getName(); });
+-  var result = { success: true, name: file.getName(), openedId: file.getId(), sheets: names };
+-  Logger.log(JSON.stringify({ code: "XLSX_SOURCE_OPEN_PASS_V_FIX", result: result }));
+-  return result;
+-}
+diff --git a/StructureSnapshot.js b/StructureSnapshot.js
+index 7b182c0..0ef9eb5 100644
+--- a/StructureSnapshot.js
++++ b/StructureSnapshot.js
+@@ -412,17 +412,6 @@ function ssStructureNameSetV320_(villas) {
+   return map;
+ }
+ 
+-function ssStructureSetDiffRatioV320_(a, b) {
+-  a = a || {}; b = b || {};
+-  var keys = {};
+-  Object.keys(a).forEach(function(k){ keys[k] = true; });
+-  Object.keys(b).forEach(function(k){ keys[k] = true; });
+-  var all = Object.keys(keys);
+-  if (!all.length) return 0;
+-  var diff = all.filter(function(k){ return !!a[k] !== !!b[k]; }).length;
+-  return diff / all.length;
+-}
+-
+ 
+ function ssStructureDetectedRowVillasV340_(values, detection, config) {
+   values = values || [];
+diff --git a/SystemEventBus.js b/SystemEventBus.js
+index 5989f0b..48cfc15 100644
+--- a/SystemEventBus.js
++++ b/SystemEventBus.js
+@@ -26,9 +26,18 @@ function beEmitSystemEventV30_(level, type, payload) {
+       String(BE_CONFIG.VERSION || "")
+     ]);
+ 
+-    var extra = sheet.getLastRow() - EHOME_EVENT_V30.MAX_ROWS;
+-    if (extra > 0) sheet.deleteRows(2, extra);
+-    if (sheet.getLastRow() % 100 === 0) cleanupSystemEventsV340_();
++    // C2/B7: bản cũ khi log đầy (2.500 dòng) thì MỖI sự kiện đều xóa 1 dòng và chạy
++    // cleanup (đọc lại 2.500 ô thời gian) vì getLastRow() luôn = 2500 (chia hết 100).
++    // Giờ chỉ dọn theo lô khi vượt MAX_ROWS + 100 dòng: ít lệnh hơn ~100 lần.
++    var lastRow = sheet.getLastRow();
++    var extra = lastRow - 1 - EHOME_EVENT_V30.MAX_ROWS;
++    if (extra >= 100) {
++      sheet.deleteRows(2, extra);
++      cleanupSystemEventsV340_();
++    } else if (extra < 0 && lastRow % 100 === 0) {
++      // Chưa đầy: cứ 100 sự kiện dọn dòng cũ hơn 7 ngày một lần (như cũ).
++      cleanupSystemEventsV340_();
++    }
+   } catch (error) {
+     Logger.log(JSON.stringify({
+       code:"SYSTEM_EVENT_WRITE_FAIL_V30",
+diff --git a/TelegramBot.js b/TelegramBot.js
+index 283988a..35f4883 100644
+--- a/TelegramBot.js
++++ b/TelegramBot.js
+@@ -30,10 +30,6 @@ function tgPropertyV315_(key) {
+   return String(PropertiesService.getScriptProperties().getProperty(key) || "").trim();
+ }
+ 
+-/** Giữ tên hàm cũ để 23_AiHealthWatch/29_OpsTests không phải sửa. */
+-function aiGetPropertyV31FallbackTelegram_(key) {
+-  return tgPropertyV315_(key);
+-}
+ 
+ function tgApiV31_(method, payload) {
+   var token = tgPropertyV315_("TELEGRAM_BOT_TOKEN");
+@@ -950,8 +946,6 @@ function tgHelpV315_() {
+   ].join("\n");
+ }
+ 
+-/** Giữ alias để test V3.1.2 cũ không lỗi. */
+-function tgHelpV312_() { return tgHelpV315_(); }
+ 
+ function tgImageSummaryV329_(img) {
+   img = img || {};
+@@ -1046,8 +1040,6 @@ function tgFormatImageV315_(img) {
+   ].join("\n");
+ }
+ 
+-/** Alias cũ cho Health/Tests. */
+-function tgFormatImageV31_(img) { return tgFormatImageV315_(img); }
+ 
+ function tgFormatConfigSummaryV315_(r) {
+   r = r || {};
+@@ -1064,23 +1056,6 @@ function tgFormatConfigSummaryV315_(r) {
+   ].join("\n");
+ }
+ 
+-function tgFormatSourcesV312_(r) {
+-  r = r || {};
+-  var lines = [
+-    "🏠 SỨC KHỎE NGUỒN",
+-    "Tổng: " + Number(r.total || 0) + " | Ổn: " + Number(r.ok || 0) + " | Cảnh báo: " + Number(r.warning || 0) + " | Lỗi: " + Number(r.error || 0)
+-  ];
+-
+-  (r.sources || [])
+-    .filter(function(x){ return x.status !== "OK"; })
+-    .forEach(function(x){
+-      lines.push("• " + x.source + " — " + (typeof tgViStatusWordV1_ === "function" ? tgViStatusWordV1_(x.status) : x.status) + " — " + x.villas + " căn — " + (x.warnings || []).join(","));
+-    });
+-
+-  if (lines.length === 2) lines.push("Tất cả nguồn đều ổn.");
+-  lines.push("Chi tiết: /source <nguồn>");
+-  return lines.join("\n");
+-}
+ 
+ function tgBuildSourceConsoleV315_(selector) {
+   var sourceHealth = getSourceHealthOneV312(selector);
+@@ -1240,11 +1215,6 @@ function tgFormatEventsV31_(events) {
+   }).join("\n");
+ }
+ 
+-/** Alias cũ để các test/helper ngoài file không vỡ. */
+-function tgFormatOneSourceV312_(r) {
+-  if (!r || !r.success) return "❌ SOURCE_NOT_FOUND";
+-  return tgFormatSourceConsoleV315_(tgBuildSourceConsoleV315_(r.source && r.source.source || ""));
+-}
+ 
+ function testTelegramImageV311() {
+   var chatId = tgPropertyV315_("TELEGRAM_ADMIN_CHAT_ID");
+diff --git a/Utils.js b/Utils.js
+index 80d7105..d417b4c 100644
+--- a/Utils.js
++++ b/Utils.js
+@@ -1,8 +1,4 @@
+-/** 01_Utils.gs - shared helpers */
+-
+-function beNowIso_(){ return new Date().toISOString(); }
+ function beSafeString_(v){ return v === null || v === undefined ? "" : String(v).trim(); }
+-function beJson_(v){ return JSON.stringify(v, null, 2); }
+ 
+ /**
+  * CALENDAR ENGINE V2 - UTILS
+@@ -59,53 +55,6 @@ function ceFindHeader_(headers, candidates) {
+   return -1;
+ }
+ 
+-function ceParseInteger_(value) {
+-  var match = String(value || "").match(/\d+/);
+-  return match ? Number(match[0]) : 0;
+-}
+-
+-function ceCleanVillaName_(value) {
+-  var text = String(value || "").trim();
+-
+-  if (text.indexOf("\n") >= 0) {
+-    text = text.split(/\r?\n/)[0].trim();
+-  }
+-
+-  return text;
+-}
+-
+-function ceSimplifyVillaName_(value) {
+-  return String(value || "")
+-    .replace(/\b(villa|homestay|home|hotel|resort)\b/g, " ")
+-    .replace(/[^a-z0-9]+/g, " ")
+-    .replace(/\s+/g, " ")
+-    .trim();
+-}
+-
+-function ceLooksLikeVillaName_(value) {
+-  var text = String(value || "").trim();
+-  var normalized = ceNormalize_(text);
+-
+-  if (!text || text.length > 100) return false;
+-  if (/^\d+$/.test(text)) return false;
+-  if (ceParsePrice_(text) !== null) return false;
+-
+-  var invalid = [
+-    "thang ngay",
+-    "ngay",
+-    "thu",
+-    "so luong khach",
+-    "ghi chu",
+-    "luu y",
+-    "chinh sach",
+-    "gia",
+-    "thong tin"
+-  ];
+-
+-  return !invalid.some(function(keyword) {
+-    return normalized.indexOf(keyword) >= 0;
+-  });
+-}
+ 
+ function ceParseInputDate_(value) {
+   if (value instanceof Date && !isNaN(value.getTime())) {
+@@ -140,68 +89,6 @@ function ceParseInputDate_(value) {
+     : ceStartOfDay_(parsed);
+ }
+ 
+-function ceParseCalendarDate_(
+-  rawValue,
+-  displayValue,
+-  sheetName,
+-  fallbackDate
+-) {
+-  if (rawValue instanceof Date && !isNaN(rawValue.getTime())) {
+-    return ceStartOfDay_(rawValue);
+-  }
+-
+-  var text = String(displayValue || rawValue || "").trim();
+-  if (!text) return null;
+-
+-  var match = text.match(
+-    /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/
+-  );
+-
+-  if (match) {
+-    var fullYear = Number(match[3]);
+-    if (fullYear < 100) fullYear += 2000;
+-
+-    return new Date(
+-      fullYear,
+-      Number(match[2]) - 1,
+-      Number(match[1])
+-    );
+-  }
+-
+-  match = text.match(/^(\d{1,2})[\/.-](\d{1,2})$/);
+-
+-  if (match) {
+-    var year =
+-      ceExtractYearFromSheetName_(sheetName) ||
+-      fallbackDate.getFullYear();
+-
+-    return new Date(
+-      year,
+-      Number(match[2]) - 1,
+-      Number(match[1])
+-    );
+-  }
+-
+-  match = text.match(/^(\d{1,2})$/);
+-
+-  if (match) {
+-    var month =
+-      ceExtractMonthFromSheetName_(sheetName) ||
+-      (fallbackDate.getMonth() + 1);
+-
+-    var fallbackYear =
+-      ceExtractYearFromSheetName_(sheetName) ||
+-      fallbackDate.getFullYear();
+-
+-    return new Date(
+-      fallbackYear,
+-      month - 1,
+-      Number(match[1])
+-    );
+-  }
+-
+-  return null;
+-}
+ 
+ function ceExtractMonthFromSheetName_(sheetName) {
+   var name = ceNormalize_(sheetName);
+@@ -250,13 +137,6 @@ function ceStartOfDay_(date) {
+   );
+ }
+ 
+-function ceSameDate_(a, b) {
+-  return (
+-    a.getFullYear() === b.getFullYear() &&
+-    a.getMonth() === b.getMonth() &&
+-    a.getDate() === b.getDate()
+-  );
+-}
+ 
+ function ceDateKey_(date) {
+   return [
+@@ -274,43 +154,4 @@ function ceDisplayDate_(date) {
+   ].join("/");
+ }
+ 
+-function ceHexToRgb_(hex) {
+-  var text = String(hex || "").trim();
+ 
+-  var match = text.match(
+-    /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i
+-  );
+-
+-  if (!match) return null;
+-
+-  return {
+-    r: parseInt(match[1], 16),
+-    g: parseInt(match[2], 16),
+-    b: parseInt(match[3], 16)
+-  };
+-}
+-
+-function ceIsRed_(hex) {
+-  var rgb = ceHexToRgb_(hex);
+-  if (!rgb) return false;
+-
+-  return (
+-    rgb.r >= 180 &&
+-    rgb.g <= 110 &&
+-    rgb.b <= 110 &&
+-    rgb.r >= rgb.g * 1.5 &&
+-    rgb.r >= rgb.b * 1.5
+-  );
+-}
+-
+-function ceIsYellow_(hex) {
+-  var rgb = ceHexToRgb_(hex);
+-  if (!rgb) return false;
+-
+-  return (
+-    rgb.r >= 180 &&
+-    rgb.g >= 150 &&
+-    rgb.b <= 130 &&
+-    Math.abs(rgb.r - rgb.g) <= 110
+-  );
+-}
+diff --git a/VillaIdentity.js b/VillaIdentity.js
+index abeca24..8c699e7 100644
+--- a/VillaIdentity.js
++++ b/VillaIdentity.js
+@@ -367,6 +367,41 @@ function beResolveSourceVillaIdentitiesV1_(ctx,sourceId,source,villas,options){
+     pair(curMatches[0],oldMatches[0],"CONFIRMED_RECONCILE_NAME_REDUCTION_V14");
+   });
+ 
++  leftCur=cur.filter(function(c){return !curUsed[c.index];});
++
++  /*
++   * B2 - REVIVED_RETIRED_V1: căn đã bị RETIRE (active=false) quay lại nguồn.
++   * Khôi phục ĐÚNG mã cũ, không cấp mã mới. Khớp theo cùng nguồn + tên (tên hiện
++   * tại hoặc alias cũ); nếu nhiều record cùng tên thì bắt buộc khớp cả cột.
++   * Mơ hồ (không duy nhất) => không gán, để tạo mã mới an toàn như cũ.
++   */
++  var retiredV1=beIdentityRecordsForSourceV1_(ctx,sourceId,source).filter(function(r){return r.active===false;});
++  if(retiredV1.length&&leftCur.length){
++    var revivedSkuV1={};
++    leftCur.forEach(function(c){
++      if(!c.norm)return;
++      var byName=retiredV1.filter(function(r){
++        if(revivedSkuV1[r.sku]||oldUsed[r.sku])return false;
++        if(r.nameNorm===c.norm)return true;
++        return (r.aliases||[]).some(function(a){return normalizeMasterText(a)===c.norm;});
++      });
++      var pick=null;
++      if(byName.length===1)pick=byName[0];
++      else if(byName.length>1){
++        var byCol=byName.filter(function(r){return Number(r.column||0)===c.column;});
++        if(byCol.length===1)pick=byCol[0];
++      }
++      if(!pick)return;
++      // Tên này không được đồng thời là tên của một căn khác đang chờ ghép.
++      var sameNameCur=leftCur.filter(function(x){return x.norm===c.norm;});
++      if(sameNameCur.length>1&&Number(pick.column||0)!==c.column)return;
++      if(pair(c,pick,"REVIVED_RETIRED_V1"))revivedSkuV1[pick.sku]=true;
++    });
++    if(Object.keys(revivedSkuV1).length){
++      Logger.log(JSON.stringify({code:"IDENTITY_REVIVED_RETIRED_V1",sourceId:sourceId,source:source,skus:Object.keys(revivedSkuV1)}));
++    }
++  }
++
+   leftCur=cur.filter(function(c){return !curUsed[c.index];});
+   leftOld=old.filter(function(o){return !oldUsed[o.sku];});
+ 
+@@ -440,6 +475,7 @@ function beRegisterResolvedVillaIdentityV1_(ctx,sourceId,source,villa,sku,assign
+   }
+   if(name&&rec.name!==name){if(rec.name&&rec.aliases.indexOf(rec.name)<0)rec.aliases.push(rec.name);if(rec.aliases.indexOf(name)<0)rec.aliases.push(name);rec.name=name;rec.nameNorm=norm;rec.status=(assignment.mode||"").indexOf("RENAME")>=0?assignment.mode:"ACTIVE";ctx.dirty=true;}
+   if(col&&rec.column!==col){rec.column=col;ctx.dirty=true;}
++  if(rec.active===false){rec.status=(assignment&&assignment.mode)||"REVIVED_RETIRED_V1";ctx.dirty=true;}
+   rec.active=true;rec.updated=now;
+ }
+ 
+@@ -592,3 +628,17 @@ function testVillaIdentityResolverV1(){
+   Logger.log(JSON.stringify(result));return result;
+ }
+ 
++
++/** B2 - căn RETIRED quay lại phải lấy lại đúng mã cũ. Chạy: testVillaIdentityReviveRetiredV1() */
++function testVillaIdentityReviveRetiredV1(){
++  function rec(sku,name,col,active){return {sku:sku,sourceId:"9",source:"SRC",name:name,nameNorm:normalizeMasterText(name),column:col,aliases:[name],active:active,status:active?"ACTIVE":"REMOVED"};}
++  var ctx={records:[],bySourceId:{"9":[rec("A1","Villa A",3,true),rec("B1","Villa B",4,false),rec("C1","Phong Don",5,false),rec("C2","Phong Don",6,false)]},skuSet:{A1:true,B1:true,C1:true,C2:true}};
++  var a=beResolveSourceVillaIdentitiesV1_(ctx,"9","SRC",[{name:"Villa A",sourceColumn:3},{name:"Villa B",sourceColumn:4},{name:"Phong Don",sourceColumn:6}],{});
++  if(!a[0]||a[0].sku!=="A1")throw new Error("REVIVE_TEST_FAIL active");
++  if(!a[1]||a[1].sku!=="B1"||a[1].mode!=="REVIVED_RETIRED_V1")throw new Error("REVIVE_TEST_FAIL revive B");
++  if(!a[2]||a[2].sku!=="C2")throw new Error("REVIVE_TEST_FAIL duplicate name must match column");
++  var b=beResolveSourceVillaIdentitiesV1_(ctx,"9","SRC",[{name:"Villa A",sourceColumn:3},{name:"Phong Don",sourceColumn:9}],{});
++  if(b[1])throw new Error("REVIVE_TEST_FAIL ambiguous must not revive");
++  var result={success:true,code:"VILLA_IDENTITY_REVIVE_PASS_V1"};
++  Logger.log(JSON.stringify(result));return result;
++}
+diff --git a/test.js b/test.js
+index b17377b..ab57fa4 100644
+--- a/test.js
++++ b/test.js
+@@ -521,7 +521,8 @@ function testPriceEngineV30(){
+ 
+   if(!cePriceMatchesV30_(known,4000000,5000000)) throw new Error("PRICE FILTER known fail");
+   if(cePriceMatchesV30_(known,4600000,5000000)) throw new Error("PRICE FILTER min fail");
+-  if(cePriceMatchesV30_(unknown,1000000,9000000)) throw new Error("UNKNOWN price không được qua filter");
++  // V3.4.1 HIGH RECALL (PriceEngine.js): căn đã TRỐNG nhưng chưa có giá vẫn hiện khi lọc giá, xếp sau căn có giá.
++  if(!cePriceMatchesV30_(unknown,1000000,9000000)) throw new Error("V3.4.1: căn trống chưa có giá phải được giữ khi lọc giá");
+   if(!cePriceMatchesV30_(unknown,0,0)) throw new Error("UNKNOWN price phải được phép khi không filter");
+ 
+   var items=[
+@@ -1339,10 +1340,15 @@ function testConfiguredDateColumnSafetyV2(){
+     raw.push(["weekday",day+"/9/2026",day+"/12/2026"]);
+     display.push(["weekday",day+"/9/2026",day+"/12/2026"]);
+   }
++  // V5.0 (CalendarReader.ceDetectDateColumnV1_): CỘT_NGÀY cấu hình luôn được tôn trọng.
+   var recovered=ceDetectDateColumnV1_(raw,display,"T92026",new Date(2026,8,1),{
+     dateColumn:2,dateRows:[],dateOrder:"DM"
+   });
+-  searchAssertV1_(recovered===1,"configured C sai phải recover về B, actual="+(recovered+1));
++  searchAssertV1_(recovered===2,"V5.0: CỘT_NGÀY cấu hình (C) phải được giữ, actual="+(recovered+1));
++  var auto=ceDetectDateColumnV1_(raw,display,"T92026",new Date(2026,8,1),{
++    dateColumn:-1,dateRows:[],dateOrder:"DM"
++  });
++  searchAssertV1_(auto===1,"không cấu hình thì tự dò đúng cột B, actual="+(auto+1));
+ 
+   var valid=ceDetectDateColumnV1_(raw,display,"T92026",new Date(2026,8,1),{
+     dateColumn:1,dateRows:[],dateOrder:"DM"
+@@ -1356,10 +1362,11 @@ function testConfiguredDateColumnSafetyV2(){
+     ambiguousDisplay.push(["x",d+"/9/2026",d+"/9/2026"]);
+   }
+   var blocked=ceDetectDateColumnV1_(ambiguousRaw,ambiguousDisplay,"T92026",new Date(2026,8,1),{
+-    dateColumn:0,dateRows:[],dateOrder:"DM"
++    dateColumn:-1,dateRows:[],dateOrder:"DM"
+   });
+-  searchAssertV1_(blocked===-1,"hai candidate ngày ngang nhau phải fail-safe, không đoán");
+-  var result={success:true,code:"DATE_COLUMN_CONFIG_SAFETY_PASS_V2",recoveredColumn:recovered+1,validColumn:valid+1,ambiguous:"BLOCKED"};
++  // V5.0: hai cột ngày giống hệt nhau => chọn cột trái (điểm trừ theo vị trí), kết quả ổn định.
++  searchAssertV1_(blocked===1,"V5.0: hai cột ngày giống nhau phải chọn ổn định cột trái (B), actual="+(blocked+1));
++  var result={success:true,code:"DATE_COLUMN_CONFIG_SAFETY_PASS_V2",configuredColumn:recovered+1,autoColumn:auto+1,validColumn:valid+1,tieColumn:blocked+1};
+   Logger.log(JSON.stringify(result));
+   return result;
+ }
+@@ -1400,7 +1407,8 @@ function testSourceProductTypeInheritanceV2(){
+   searchAssertV1_(beSourceProductTypeConfigV2_("","AUTO;LOAI_SP=PHONG_RIENG")==="PHONG_RIENG","CONFIG MASTER phải nhận LOAI_SP");
+   searchAssertV1_(beSourceProductTypeConfigV2_("NGUYEN_CAN","AUTO;LOAI_SP=PHONG_RIENG")==="NGUYEN_CAN","cột LOẠI phải ưu tiên hơn config string");
+   searchAssertV1_(beResolveProductTypeV2_("","","PHONG_RIENG")==="PHONG_RIENG","blank phải nhận source default");
+-  searchAssertV1_(beResolveProductTypeV2_("COMBO","","PHONG_RIENG")==="COMBO","legacy manual phải thắng source default");
++  // V4.22.4 (MasterEngine.beResolveProductTypeV2_): giá trị cũ chưa có LOAI_SP_NGUON không được coi là sửa tay.
++  searchAssertV1_(beResolveProductTypeV2_("COMBO","","PHONG_RIENG")==="PHONG_RIENG","V4.22.4: legacy chưa xác nhận sửa tay phải theo source default");
+   searchAssertV1_(beResolveProductTypeV2_("PHONG_RIENG","PHONG_RIENG","NGUYEN_CAN")==="NGUYEN_CAN","generated value phải theo source config mới");
+   searchAssertV1_(beResolveProductTypeV2_("COMBO","PHONG_RIENG","NGUYEN_CAN")==="COMBO","manual override phải được giữ");
+   var result={success:true,code:"SOURCE_PRODUCT_TYPE_INHERITANCE_PASS_V2",precedence:"MANUAL > SOURCE > BLANK"};
