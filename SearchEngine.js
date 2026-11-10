@@ -1115,6 +1115,10 @@ function ceBuildFastSourcePlansV23_(villas, startCursor) {
 function ceOpenSpreadsheetFastV23_(url) {
   var text = String(url || "");
   var match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  // Mục 10: nguồn đã biết là .xlsx => mở thẳng bản tạm, không thử openById (chắc chắn lỗi).
+  if (match && match[1] && typeof beIsKnownXlsxSourceV1_ === "function" && beIsKnownXlsxSourceV1_(match[1])) {
+    return beOpenSourceSpreadsheetV_FIX(text);
+  }
   if (match && match[1]) {
     // B10: file vừa bị từ chối quyền trong 15 phút qua => báo ngay, không mở lại (tiết kiệm 1-3 giây/nguồn).
     if (ceNoAccessFileCachedB10_(match[1])) {
