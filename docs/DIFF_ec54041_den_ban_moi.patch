@@ -19,6 +19,14 @@ index a014a44..8d59d40 100644
 +**/*.md
 +tools/**
 +**/package.json
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..90037e3
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,2 @@
++tools/local_test/node_modules/
++tools/local_test/callgraph.json
 diff --git a/Admin.js b/Admin.js
 index dbb276d..1a8eb18 100644
 --- a/Admin.js
@@ -611,10 +619,10 @@ index 132b615..c791780 100644
  function ceCustomerSanitizeVillaV61_(v,m,type,pricing,amenities){var min=Number(v.capacityMin||0),max=Number(v.capacityMax||0);return {villaId:String(v.villaId||""),name:String(v.name||""),city:String(v.city||""),image:String(v.image||""),productType:type,roomGroupId:type==="PHONG_RIENG"?String(m.roomGroupId||""):"",featured:false,standard:String(v.standard||""),capacityMin:min,capacityMax:max,capacityLabel:String(v.capacityLabel||v.standard||"Liên hệ"),bedrooms:String(v.bedrooms||m.bedrooms||""),info:ceCustomerSanitizeInfoV61_(v.info||""),amenities:amenities||[],available:v.available===true,priceStatus:pricing.totalPrice===null?"CONTACT":"KNOWN",totalPrice:pricing.totalPrice,totalPriceText:pricing.totalPriceText,averageNightPrice:pricing.averageNightPrice,averageNightPriceText:pricing.averageNightPriceText,nights:Number(v.nights||pricing.nightlyPrices.length||0),nightlyPrices:pricing.nightlyPrices};}
 diff --git a/GhostGuard.js b/GhostGuard.js
 new file mode 100644
-index 0000000..750d0dd
+index 0000000..e2acdb9
 --- /dev/null
 +++ b/GhostGuard.js
-@@ -0,0 +1,426 @@
+@@ -0,0 +1,428 @@
 +/**
 + * GhostGuard.js - V2 (B1) CHỐNG CĂN ẢO TRONG NGUỒN ĐANG BẬT
 + *
@@ -937,7 +945,9 @@ index 0000000..750d0dd
 +function beGhostMutateStateV1_(fn) {
 +  var lock = LockService.getScriptLock();
 +  var locked = false;
-+  try { locked = lock.tryLock(20000); } catch (ignore) {}
++  var heldOutside = false;
++  try { heldOutside = lock.hasLock(); } catch (ignoreHas) {}
++  if (!heldOutside) { try { locked = lock.tryLock(20000); } catch (ignore) {} }
 +  try {
 +    var props = PropertiesService.getScriptProperties();
 +    var loaded = beGhostLoadStateV1_(props);
@@ -1096,7 +1106,7 @@ index 9b62518..618bc74 100644
        if(r)return "⚠️ Đọc lịch chưa được ("+r+")";
        return "⏳ Cần kiểm tra lịch / giá";
 diff --git a/MasterEngine.js b/MasterEngine.js
-index 2564ba4..1091ca8 100644
+index 2564ba4..fee81ce 100644
 --- a/MasterEngine.js
 +++ b/MasterEngine.js
 @@ -98,161 +98,6 @@ function beShouldRefreshImageSourceV4224_(imageSource) {
@@ -1405,7 +1415,7 @@ index 2564ba4..1091ca8 100644
    return name;
  
  }
-@@ -1778,17 +1672,118 @@ function beCalendarSheetDescriptorV4210_(sheetName, referenceDate) {
+@@ -1778,17 +1672,120 @@ function beCalendarSheetDescriptorV4210_(sheetName, referenceDate) {
      }
    }
    if (month && !year && typeof ceYearFromSheetNameV1_ === "function") year = ceYearFromSheetNameV1_(raw) || 0;
@@ -1491,7 +1501,9 @@ index 2564ba4..1091ca8 100644
 +    if (/^(cn|chu nhat|sun|sunday)$/.test(t)) return 0;
 +    var m = t.match(/^(?:t|thu)\s*([2-7])$/);
 +    if (m) return Number(m[1]) - 1;
++    // Gồm cả nhãn ngắn hay gặp trong lịch nguồn: "Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy".
 +    var words = {"thu hai":1,"thu ba":2,"thu tu":3,"thu nam":4,"thu sau":5,"thu bay":6,
++      hai:1,ba:2,tu:3,nam:4,sau:5,bay:6,
 +      mon:1,monday:1,tue:2,tuesday:2,wed:3,wednesday:3,thu:4,thursday:4,fri:5,friday:5,sat:6,saturday:6};
 +    return Object.prototype.hasOwnProperty.call(words, t) ? words[t] : -1;
 +  };
@@ -1527,7 +1539,7 @@ index 2564ba4..1091ca8 100644
  function beIsCalendarLikeUnknownV4210_(sheet) {
    if (!sheet) return false;
    var raw = String(sheet.getName() || "");
-@@ -1824,6 +1819,9 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+@@ -1824,6 +1821,9 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
      explicitName = "";
    }
  
@@ -1537,7 +1549,7 @@ index 2564ba4..1091ca8 100644
    if (explicitName) {
      var configured = beFindVisibleSheetByLooseNameV4210_(file, explicitName);
      if (configured) {
-@@ -1832,7 +1830,8 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+@@ -1832,7 +1832,8 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
          configured:explicitName,
          sheet:configured.getName()
        }));
@@ -1547,7 +1559,7 @@ index 2564ba4..1091ca8 100644
      }
      Logger.log(JSON.stringify({
        level:"WARNING",code:"MASTER_CALENDAR_CONFIG_FALLBACK_V4210",
-@@ -1870,6 +1869,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+@@ -1870,6 +1871,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
    var currentVisible=[], previousVisible=[], nextVisible=[], unknown=[];
    candidates.forEach(function(sheet){
      var d = beCalendarSheetDescriptorV4210_(sheet.getName(), referenceDate);
@@ -1555,7 +1567,7 @@ index 2564ba4..1091ca8 100644
      if (same_(d,current)) currentVisible.push(sheet);
      else if (same_(d,previous)) previousVisible.push(sheet);
      else if (same_(d,next)) nextVisible.push(sheet);
-@@ -1902,8 +1902,10 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+@@ -1902,8 +1904,10 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
      // V4.22.4 FIX: không fallback vào tab tháng cũ hơn tháng trước (stale).
      // Tab không nhận ra được tháng (ví dụ "CHẠNG VẠNG") vẫn fallback như cũ.
      var soleDescV4224 = beCalendarSheetDescriptorV4210_(candidates[0].getName(), referenceDate);
@@ -1568,7 +1580,7 @@ index 2564ba4..1091ca8 100644
      if (!soleIsStaleV4224) {
        chosen = candidates[0];
        mode = "SOLE_VISIBLE_NON_INFO_FALLBACK_V4223";
-@@ -1916,7 +1918,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+@@ -1916,7 +1920,7 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
        sheet:chosen.getName(),mode:mode,
        currentMonth:current.month,currentYear:current.year
      }));
@@ -1577,7 +1589,7 @@ index 2564ba4..1091ca8 100644
    }
  
    var recognizedVisible = candidates.filter(function(sheet){
-@@ -1929,10 +1931,43 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
+@@ -1929,10 +1933,43 @@ function beMasterCalendarSelectionV4210_(file, rawCalendarConfig, referenceDate)
        visibleMonthSheets:recognizedVisible.map(function(sheet){return sheet.getName();}),
        action:"DO_NOT_REUSE_STALE_MONTH_VILLAS"
      }));
@@ -1623,7 +1635,7 @@ index 2564ba4..1091ca8 100644
  }
  
  function beFindMasterCalendarSheetV4210_(file, rawCalendarConfig, referenceDate) {
-@@ -3531,6 +3566,11 @@ function buildMasterVilla(options){
+@@ -3531,6 +3568,11 @@ function buildMasterVilla(options){
    // Incremental luôn dùng fast image mode. Full sync qua Admin cũng bật fastImages.
    BE_MASTER_FAST_IMAGE_MODE_V328_ = incrementalModeV328 || options.fastImages === true;
    beClearMasterSheetRuntimeCacheV21_();
@@ -1635,7 +1647,7 @@ index 2564ba4..1091ca8 100644
    var ss = SpreadsheetApp.getActiveSpreadsheet();
    var master = ss.getSheetByName(BE_CONFIG.MASTER_SHEET);
  
-@@ -3679,6 +3719,7 @@ function buildMasterVilla(options){
+@@ -3679,6 +3721,7 @@ function buildMasterVilla(options){
      };
    }
  
@@ -1643,7 +1655,7 @@ index 2564ba4..1091ca8 100644
    var previousSourceCountByLinkV328 = {};
    var previousSourceCountByNameV328 = {};
    previousOutputRowsV328.forEach(function(previousRow) {
-@@ -3690,6 +3731,8 @@ function buildMasterVilla(options){
+@@ -3690,6 +3733,8 @@ function buildMasterVilla(options){
  
    var result = [];
    var sourceStatuses = [];
@@ -1652,7 +1664,7 @@ index 2564ba4..1091ca8 100644
    var opened = 0;
    var imageDiagnostics = {
      detected: 0,
-@@ -3787,6 +3830,7 @@ function buildMasterVilla(options){
+@@ -3787,6 +3832,7 @@ function buildMasterVilla(options){
      );
  
      var sourceStartedAtV21 = new Date().getTime();
@@ -1660,7 +1672,7 @@ index 2564ba4..1091ca8 100644
      var sourceResultStartV328 = result.length;
      var sourceQueueStartV328 = imageQueueRecordsV21.length;
      var sourceMissingRecordStartV328 = imageDiagnostics.missingRecords.length;
-@@ -3803,6 +3847,7 @@ function buildMasterVilla(options){
+@@ -3803,6 +3849,7 @@ function buildMasterVilla(options){
      try {
        var file = beOpenSourceSpreadsheetV_FIX(link);  // FIX: hỗ trợ nguồn .xlsx
        opened++;
@@ -1668,7 +1680,7 @@ index 2564ba4..1091ca8 100644
  
        var imageVillas = [];
        var infoVillas = [];
-@@ -3826,6 +3871,12 @@ function buildMasterVilla(options){
+@@ -3826,6 +3873,12 @@ function buildMasterVilla(options){
        );
        var calendarSheet = calendarSelectionV4210.sheet;
        var inactiveCalendarWindowV4210 = calendarSelectionV4210.inactiveWindow === true;
@@ -1681,7 +1693,7 @@ index 2564ba4..1091ca8 100644
        var imageSheet = calendarSheet;
        var infoSheet = calendarSheet;
        var hasExplicitImageSupplementV414 = beHasExplicitMetadataSheetV38_(imageConfig);
-@@ -3949,6 +4000,7 @@ function buildMasterVilla(options){
+@@ -3949,6 +4002,7 @@ function buildMasterVilla(options){
          return villa;
        });
  
@@ -1689,7 +1701,7 @@ index 2564ba4..1091ca8 100644
        var metadataVillas = beMergeSeparatedMetadataV32_(
          imageVillas,
          infoVillas
-@@ -3974,9 +4026,20 @@ function buildMasterVilla(options){
+@@ -3974,9 +4028,20 @@ function buildMasterVilla(options){
          }
        }
  
@@ -1710,7 +1722,7 @@ index 2564ba4..1091ca8 100644
  
        /*
         * V3.9 - Một căn có thể dùng một vùng tên merge và nhiều cột giá/lịch.
-@@ -4112,6 +4175,7 @@ function buildMasterVilla(options){
+@@ -4112,6 +4177,7 @@ function buildMasterVilla(options){
            [sourceIdentityV416]
          );
        });
@@ -1718,7 +1730,7 @@ index 2564ba4..1091ca8 100644
        var reconcileDecisionV416 = beAssessSourceReconcileV416_({
          sourceId: sourceId,
          source: source,
-@@ -4229,6 +4293,7 @@ function buildMasterVilla(options){
+@@ -4229,6 +4295,7 @@ function buildMasterVilla(options){
          }
        }
  
@@ -1726,7 +1738,7 @@ index 2564ba4..1091ca8 100644
        var sourceIdentityRegistrationsV1 = [];
        var villaNameCountsV40 = {};
        villas.forEach(function(villa) {
-@@ -4255,6 +4320,19 @@ function buildMasterVilla(options){
+@@ -4255,6 +4322,19 @@ function buildMasterVilla(options){
          // nếu registry chưa gán thì mới dùng map rename R2 hiện hữu của production.
          if (!identityAssignmentV1) {
            var preservedRenameSkuV4194 = confirmedRenameSkuMapV4194[Number(villa.sourceColumn || 0)] || "";
@@ -1746,7 +1758,7 @@ index 2564ba4..1091ca8 100644
            if (preservedRenameSkuV4194) {
              villaSku = preservedRenameSkuV4194;
              Logger.log(JSON.stringify({
-@@ -4263,6 +4341,25 @@ function buildMasterVilla(options){
+@@ -4263,6 +4343,25 @@ function buildMasterVilla(options){
                sourceColumn:Number(villa.sourceColumn || 0),sku:villaSku,
                rule:"R2_CONFIRMED_SINGLE_RENAME_SAME_UNIQUE_COLUMN"
              }));
@@ -1772,7 +1784,7 @@ index 2564ba4..1091ca8 100644
            }
          }
  
-@@ -4507,12 +4604,14 @@ function buildMasterVilla(options){
+@@ -4507,12 +4606,14 @@ function buildMasterVilla(options){
          }
        }
  
@@ -1788,7 +1800,7 @@ index 2564ba4..1091ca8 100644
        }));
  
        sourceStatuses.push({
-@@ -4537,6 +4636,7 @@ function buildMasterVilla(options){
+@@ -4537,6 +4638,7 @@ function buildMasterVilla(options){
        failedRowsV328.push(masterRowNumberV328);
        failedIdentitiesV416.push(sourceIdentityV416);
  
@@ -1796,7 +1808,7 @@ index 2564ba4..1091ca8 100644
        Logger.log(JSON.stringify({
          level: "ERROR",
          code: "MASTER_SOURCE_FAILED_V21",
-@@ -4570,6 +4670,7 @@ function buildMasterVilla(options){
+@@ -4570,6 +4672,7 @@ function buildMasterVilla(options){
          outputHeaders.length
        );
  
@@ -1804,7 +1816,7 @@ index 2564ba4..1091ca8 100644
    // Critical publish window: cache tập candidate hoàn chỉnh trước khi clear.
    // Search sẽ không bao giờ đọc/cache một MASTER_VILLA đang ghi dở.
    var masterPublishSuccessV1 = false;
-@@ -4631,10 +4732,14 @@ function buildMasterVilla(options){
+@@ -4631,10 +4734,14 @@ function buildMasterVilla(options){
    }));
  
    output.setFrozenRows(1);
@@ -1820,7 +1832,7 @@ index 2564ba4..1091ca8 100644
    beSyncMissingImageOverridesV35_(
      imageOverrideStore.sheet,
      imageDiagnostics.missingRecords
-@@ -4678,6 +4783,7 @@ function buildMasterVilla(options){
+@@ -4678,6 +4785,7 @@ function buildMasterVilla(options){
      }
    }
  
@@ -1828,7 +1840,7 @@ index 2564ba4..1091ca8 100644
    if (villaIdentityContextV1 && typeof beFlushVillaIdentityContextV1_ === "function") {
      try {
        var identityFlushV1 = beFlushVillaIdentityContextV1_(villaIdentityContextV1);
-@@ -4691,6 +4797,20 @@ function buildMasterVilla(options){
+@@ -4691,6 +4799,20 @@ function buildMasterVilla(options){
      }
    }
  
@@ -1849,7 +1861,7 @@ index 2564ba4..1091ca8 100644
    Logger.log(JSON.stringify({
      code: "IMAGE_CACHE_SUMMARY",
      mode: BE_CONFIG.IMAGE_CACHE_INLINE === true ? "INLINE" : "BACKGROUND_QUEUE",
-@@ -4953,15 +5073,6 @@ function beFindSourceColumnRenamePairsV416_(previousRows, villas){
+@@ -4953,15 +5075,6 @@ function beFindSourceColumnRenamePairsV416_(previousRows, villas){
    return pairs;
  }
  
@@ -1865,7 +1877,7 @@ index 2564ba4..1091ca8 100644
  
  /**
   * Quyết định có được replace block source hay không khi danh sách mới làm mất
-@@ -5175,6 +5286,28 @@ function beAssessSourceReconcileV416_(options){
+@@ -5175,6 +5288,28 @@ function beAssessSourceReconcileV416_(options){
      };
    }
  
@@ -1894,7 +1906,7 @@ index 2564ba4..1091ca8 100644
    var queued = false;
    var prioritySource = {
      id:String(options.sourceId || ""),
-@@ -5511,9 +5644,7 @@ function applyDeletedSourceOrphansV4196(){
+@@ -5511,9 +5646,7 @@ function applyDeletedSourceOrphansV4196(){
  
    var ss=SpreadsheetApp.getActiveSpreadsheet();
    var villa=ss.getSheetByName(BE_CONFIG.MASTER_VILLA_SHEET||"MASTER_VILLA");
@@ -1905,7 +1917,7 @@ index 2564ba4..1091ca8 100644
    if(typeof clearBookingEngineCache==="function")clearBookingEngineCache();
    var uniqueSources={};
    preview.rows.forEach(function(x){if(x.source)uniqueSources[x.source]=true;});
-@@ -5582,7 +5713,7 @@ function autoApplyDeletedSourceOrphansV619_(options){
+@@ -5582,7 +5715,7 @@ function autoApplyDeletedSourceOrphansV619_(options){
      if(g.source)sourceNames[g.source]=true;
      g.rows.forEach(function(item){rows.push(item);if(item.sku)skus.push(item.sku);});
    });
@@ -1914,7 +1926,7 @@ index 2564ba4..1091ca8 100644
  
    var identity=null;
    if(typeof beRetireVillaIdentitySkusV619_==="function"){
-@@ -5595,6 +5726,23 @@ function autoApplyDeletedSourceOrphansV619_(options){
+@@ -5595,6 +5728,23 @@ function autoApplyDeletedSourceOrphansV619_(options){
    return result;
  }
  
@@ -1938,7 +1950,7 @@ index 2564ba4..1091ca8 100644
  function testDeletedSourceAutoGuardV619(){
    var activeIds={"176":true};
    function canDelete(identitySourceId){var sid=String(identitySourceId||"").trim();return !!sid&&!activeIds[sid];}
-@@ -5985,34 +6133,6 @@ function reconcileImageOverridesV330(){
+@@ -5985,34 +6135,6 @@ function reconcileImageOverridesV330(){
    return beReconcileImageOverridesV330_(SpreadsheetApp.getActiveSpreadsheet());
  }
  
@@ -1973,7 +1985,7 @@ index 2564ba4..1091ca8 100644
  function beGetByHeader_(row,index){return index>=0&&index<row.length?row[index]:"";}
  function beBoolCell_(v){return v===true||["true","1","yes","co","x"].indexOf(ceNormalize_(v))>=0;}
  function beWriteMasterStatuses_(sheet,headerRow,statuses){
-@@ -6042,10 +6162,103 @@ function beWriteMasterStatuses_(sheet,headerRow,statuses){
+@@ -6042,10 +6164,107 @@ function beWriteMasterStatuses_(sheet,headerRow,statuses){
    updateColumn_(h.status,function(x){return x.status;});
    updateColumn_(h.lastSync,function(x){return x.time;});
  }
@@ -2068,9 +2080,13 @@ index 2564ba4..1091ca8 100644
 +  });
 +  Logger.log(JSON.stringify({level:"WARNING", code:"MASTER_SOURCE_WARNINGS_B34", sources:summary.length, detail:summary}));
 +  if (typeof beEmitSystemEventV30_ === "function") {
++    // Ô Google Sheet tối đa 50.000 ký tự: cắt bớt danh sách nếu quá dài.
++    var payloadSources = summary.slice();
++    while (payloadSources.length > 1 && JSON.stringify(payloadSources).length > 40000) payloadSources.pop();
 +    beEmitSystemEventV30_("WARNING", "MASTER_SOURCE_WARNINGS_B34", {
 +      message: summary.length + " nguồn có cảnh báo cấu hình/tên tab",
-+      sources: summary
++      sources: payloadSources,
++      truncated: payloadSources.length < summary.length
 +    });
 +  }
 +}
@@ -2079,7 +2095,7 @@ index 2564ba4..1091ca8 100644
  /**
   * CONFIG MASTER là nền chung. CONFIG ẢNH và CONFIG THÔNG TIN chỉ ghi đè
   * các khóa được nhập, nên ghi ngắn VÙNG_HÀNG_ẢNH=1 hoặc HÀNG_THÔNG_TIN=2
-@@ -7255,9 +7468,6 @@ function beBuildOverGridImageMapV40_(sheet) {
+@@ -7255,9 +7474,6 @@ function beBuildOverGridImageMapV40_(sheet) {
    return result;
  }
  
@@ -2089,7 +2105,7 @@ index 2564ba4..1091ca8 100644
  
  /**
   * V4.2 - Ảnh nổi chỉ hợp lệ khi ô neo nằm đúng vùng hàng ảnh cấu hình.
-@@ -8525,48 +8735,6 @@ function beAssignImagesBySequenceV46_(villas, imageVillas, rawImageConfig, sheet
+@@ -8525,48 +8741,6 @@ function beAssignImagesBySequenceV46_(villas, imageVillas, rawImageConfig, sheet
  }
  
  
@@ -2393,16 +2409,17 @@ index 5f087e3..f4d8341 100644
 -}
 diff --git a/QualityTestsV1.js b/QualityTestsV1.js
 new file mode 100644
-index 0000000..d972db0
+index 0000000..aa7cc25
 --- /dev/null
 +++ b/QualityTestsV1.js
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,267 @@
 +/**
 + * QualityTestsV1.js - test thuần (không đọc/ghi Sheet) cho các bản sửa B3, B4, B6.
 + * Chạy trong Apps Script: testQualityFixesV1()
 + */
 +function testQualityFixesV1() {
 +  var results = [
++    testDeploymentIntegrityV1(),
 +    testTabYearPolicyB4(),
 +    testNamelessPriceColumnsB3()
 +  ];
@@ -2641,6 +2658,27 @@ index 0000000..d972db0
 +  qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_KEY_IGNORED", "phải báo khóa màu bị bỏ qua");
 +  qualityAssertV1_(ceFreeColorConfigIssuesV1_("AUTO;NHÓM_MÀU_TRỐNG=Vàng, Xanh lá, #ffff00").length === 0, "tên màu hợp lệ có dấu không bị báo");
 +  return {success: true, code: "COLORED_CELL_BUSY_PASS_V1"};
++}
++
++/**
++ * Kiểm tra SAU KHI PUSH: đúng bản code mới đang chạy, không bị file cũ đè.
++ * (Apps Script cho phép 2 file trùng tên hàm và lặng lẽ dùng 1 bản - vd còn sót
++ * SourceXlsxOpenV_FIX.js cũ cạnh SourceXlsxOpen.js mới.)
++ */
++function testDeploymentIntegrityV1() {
++  var g = (typeof globalThis !== "undefined") ? globalThis : this;
++  var required = ["beGhostStableReadConfirmV1_", "beGhostFlushV1_", "beResolveSourceVillaIdentitiesV1_",
++    "ceSheetYearForDateB5_", "ceFreeColorConfigIssuesV1_", "ceB6EnabledForConfigV1_", "beIsKnownXlsxSourceV1_",
++    "aiResetBreakerV1", "beB7LogSummaryV1_", "diagnoseCellColorV1", "checkTriggerHandlersV1"];
++  var missing = required.filter(function(n) { return typeof g[n] !== "function"; });
++  qualityAssertV1_(!missing.length, "thiếu hàm của bản mới: " + missing.join(", "));
++  qualityAssertV1_(String(beOpenSourceSpreadsheetV_FIX).indexOf("beIsKnownXlsxSourceV1_") >= 0,
++    "beOpenSourceSpreadsheetV_FIX đang là bản CŨ - hãy xóa file SourceXlsxOpenV_FIX.js rồi push lại");
++  qualityAssertV1_(String(ceReadCalendarCellStateV34_).indexOf("BACKGROUND_NOT_LOADED") >= 0, "ceReadCalendarCellStateV34_ đang là bản cũ");
++  qualityAssertV1_(String(beResolveSourceVillaIdentitiesV1_).indexOf("REVIVED_RETIRED_V1") >= 0, "VillaIdentity đang là bản cũ");
++  qualityAssertV1_(BE_GHOST_V1 && BE_GHOST_V1.STATE_PROPERTY === "BE_GHOST_STATE_V2", "GhostGuard đang là bản cũ");
++  qualityAssertV1_(BE_CONFIG.MASTER_AUTO_RESIZE_COLUMNS === false, "Config.js đang là bản cũ");
++  return {success: true, code: "DEPLOYMENT_INTEGRITY_PASS_V1"};
 +}
 diff --git a/ScheduleSnapshot.js b/ScheduleSnapshot.js
 index 827a5ca..41ce07b 100644
@@ -2960,7 +2998,7 @@ index e0364cd..07afea6 100644
    s = s.replace(/(^|[^a-z])(thang|thg|month)[\s._\-:,]*0?(1[0-2]|[1-9])(?!\d)/g, "$1thang $3");
    // "t.10", "t-10", "t_10" (chu T don le + dau ngan) => "thang 10"
 diff --git a/SourceAccess.js b/SourceAccess.js
-index 855f8a3..2f20ec6 100644
+index 855f8a3..e798902 100644
 --- a/SourceAccess.js
 +++ b/SourceAccess.js
 @@ -41,18 +41,6 @@ function saClassifyAccessErrorV1_(message) {
@@ -2982,15 +3020,7 @@ index 855f8a3..2f20ec6 100644
  
  /**
   * Lấy hoặc tạo tab NO_ACCESS_SOURCES
-@@ -90,6 +78,7 @@ function saGetNoAccessTabV1_() {
-     }
- 
-     saNormalizeNoAccessTabV1_(tab);
-+    saRefreshNoAccessMasterRowsV1_(tab);
-     return tab;
-   } catch (e) {
-     Logger.log("[SourceAccess] Error getting NO_ACCESS tab: " + e.message);
-@@ -98,6 +87,40 @@ function saGetNoAccessTabV1_() {
+@@ -98,6 +86,40 @@ function saGetNoAccessTabV1_() {
  }
  
  var saNormalizedThisRunV1_ = false;
@@ -3031,7 +3061,16 @@ index 855f8a3..2f20ec6 100644
  var saNoAccessIdsCacheV1_ = null;
  
  function saNoAccessHeadersV1_() {
-@@ -274,12 +297,6 @@ function saGetNoAccessSourceIdsV1_() {
+@@ -185,6 +207,8 @@ function saSaveNoAccessSourceV1_(masterRow, source, statusValue) {
+   try {
+     var tab = saGetNoAccessTabV1_();
+     if (!tab) return false;
++    // B10: tính lại cột "Dòng MASTER" từ ID - chỉ khi có ghi (hiếm), không phải mỗi lượt đọc.
++    saRefreshNoAccessMasterRowsV1_(tab);
+ 
+     var statusToUse = statusValue || EHOME_SOURCE_ACCESS_V1.STATUS_NO_ACCESS;
+     var data = tab.getDataRange().getValues();
+@@ -274,12 +298,6 @@ function saGetNoAccessSourceIdsV1_() {
    }
  }
  
@@ -3044,7 +3083,7 @@ index 855f8a3..2f20ec6 100644
  
  /**
   * Đọc source từ MASTER sheet bằng source.id
-@@ -320,10 +337,3 @@ function saMarkRecoveredIfNeededV1_(source) {
+@@ -320,10 +338,3 @@ function saMarkRecoveredIfNeededV1_(source) {
    }
  }
  
@@ -3057,10 +3096,10 @@ index 855f8a3..2f20ec6 100644
 -}
 diff --git a/SourceXlsxOpen.js b/SourceXlsxOpen.js
 new file mode 100644
-index 0000000..feeda20
+index 0000000..e6de05a
 --- /dev/null
 +++ b/SourceXlsxOpen.js
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,177 @@
 +/**
 + * SourceXlsxOpen.js (trước đây SourceXlsxOpenV_FIX.js) - đọc nguồn là file Excel .xlsx trên Drive.
 + *
@@ -3173,9 +3212,13 @@ index 0000000..feeda20
 +    return reused;
 +  }
 +
++  // Không giành/nhả khóa nếu lượt chạy này ĐÃ giữ khóa script (build, worker snapshot...):
++  // nhả ở finally sẽ nhả luôn khóa của lượt chạy bên ngoài.
 +  var lock = LockService.getScriptLock();
 +  var locked = false;
-+  try { locked = lock.tryLock(30000); } catch (ignoreLock) {}
++  var heldOutside = false;
++  try { heldOutside = lock.hasLock(); } catch (ignoreHas) {}
++  if (!heldOutside) { try { locked = lock.tryLock(30000); } catch (ignoreLock) {} }
 +  try {
 +    // Lượt chạy khác có thể vừa chuyển đổi xong trong lúc chờ khóa.
 +    var again = beParseXlsxTmpRecordV1_(props.getProperty(key));
@@ -3344,10 +3387,10 @@ index 7b182c0..0ef9eb5 100644
  function ssStructureDetectedRowVillasV340_(values, detection, config) {
    values = values || [];
 diff --git a/SystemEventBus.js b/SystemEventBus.js
-index 5989f0b..48cfc15 100644
+index 5989f0b..1e478a3 100644
 --- a/SystemEventBus.js
 +++ b/SystemEventBus.js
-@@ -26,9 +26,18 @@ function beEmitSystemEventV30_(level, type, payload) {
+@@ -26,9 +26,23 @@ function beEmitSystemEventV30_(level, type, payload) {
        String(BE_CONFIG.VERSION || "")
      ]);
  
@@ -3362,9 +3405,14 @@ index 5989f0b..48cfc15 100644
 +    if (extra >= 100) {
 +      sheet.deleteRows(2, extra);
 +      cleanupSystemEventsV340_();
-+    } else if (extra < 0 && lastRow % 100 === 0) {
-+      // Chưa đầy: cứ 100 sự kiện dọn dòng cũ hơn 7 ngày một lần (như cũ).
-+      cleanupSystemEventsV340_();
++    } else if (lastRow >= 3) {
++      // Chưa đầy: chỉ dọn khi dòng CŨ NHẤT (dòng 2) đã quá hạn giữ 7 ngày.
++      // Bản cũ chỉ dọn khi số dòng chia hết cho 100 nên log ít dòng không bao giờ được dọn
++      // (thực tế 13/11/2026 log còn dòng từ tháng 8).
++      var oldest = sheet.getRange(2, 1).getValue();
++      var oldestTime = oldest instanceof Date ? oldest.getTime() : new Date(oldest).getTime();
++      var retentionMs = Math.max(1, Number(EHOME_EVENT_V30.RETENTION_DAYS || 7)) * 86400000;
++      if (isFinite(oldestTime) && new Date().getTime() - oldestTime > retentionMs) cleanupSystemEventsV340_();
 +    }
    } catch (error) {
      Logger.log(JSON.stringify({
