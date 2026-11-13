@@ -1,8 +1,8 @@
-# Log chạy test ngoài Apps Script - head (commit c94a0bb)
-# Thời điểm: 2026-11-11 00:36 +07 | Node v22.23.4 | TZ=Asia/Ho_Chi_Minh
+# Log chạy test ngoài Apps Script - head (sau rà soát trước push)
+# Thời điểm: 2026-11-14 01:24 +07 | Node v22.23.4
 # PASS = logic thuần chạy đúng. NEEDS_LIVE = cần Google Sheet/Drive thật, KHÔNG chạy được ở đây, KHÔNG tính là đạt.
 
-{"PASS":121,"NEEDS_LIVE":82,"RETURNED_FALSE":2,"FAIL":6}
+{"PASS":122,"NEEDS_LIVE":82,"RETURNED_FALSE":2,"FAIL":6}
 PASS           testMasterIncrementalDisabledEmptyNoopV6110 
 PASS           testAiApplyStatusGuardV4222 
 PASS           testAiVillaCapacityRangeV13 
@@ -103,6 +103,7 @@ PASS           testNewYearCalendarB5
 PASS           testBatchedRowDeleteB7 
 PASS           testNoAccessCacheB10 
 PASS           testColoredCellBusyV1 
+PASS           testDeploymentIntegrityV1 
 PASS           testRepositoryProductTypeFallbackV4220 
 NEEDS_LIVE     testRepositoryPrivateRoomLiveV4220 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet
 NEEDS_LIVE     testScheduleSnapshotCoverageSummaryV341 NEEDS_LIVE_SERVICE:SpreadsheetApp.getActiveSpreadsheet

@@ -86,10 +86,29 @@ Trước khi dọn: chạy `checkTriggerHandlersV1(["startSearchBenchmarkV1","ru
 | `AuditNoAccessSources.js` | 4,6 KB | Không (công cụ audit chạy tay) | Chuyển ra, hoặc giữ nếu anh còn dùng. |
 | `PROPERTIES_DOCTOR.gs.js` | 0,9 KB | Không (`propertiesDoctor` chạy tay) | Chuyển ra; `ghostStatusV1()` đã đếm Script Property. |
 
+
+## Rà soát trước khi push (13/11/2026)
+
+Đã sửa thêm khi rà:
+- **Lỗi nghiêm trọng do bản sửa mục 10 gây ra (đã sửa):** chuyển đổi file .xlsx dùng khóa script rồi nhả khóa ở `finally`. Khi chạy bên trong build / worker snapshot (vốn đã giữ khóa script), việc này nhả luôn khóa của build. Giờ kiểm `hasLock()` trước, không giành/nhả khóa của lượt chạy bên ngoài. Sửa tương tự trong GhostGuard.
+- C2: kiểm trên sheet thật thấy SYSTEM_EVENT_LOG_V3 còn dòng từ tháng 8 => dọn 7 ngày chưa bao giờ chạy khi log ít dòng. Giờ dọn khi dòng cũ nhất quá 7 ngày.
+- B10: cột "Dòng MASTER" chỉ tính lại khi có ghi vào NO_ACCESS_SOURCES (bản trước tính lại mỗi lượt worker snapshot, tốn ~1 giây mỗi 5 phút).
+- B4: nhận thêm nhãn thứ ngắn "Hai, Ba, Tư, Năm, Sáu, Bảy" (file thảo anh dùng kiểu này).
+- Sự kiện tổng hợp cảnh báo giới hạn 40.000 ký tự (ô Google Sheet tối đa 50.000).
+- `testDeploymentIntegrityV1` (chạy trong `testQualityFixesV1`): báo đỏ nếu sau push vẫn chạy bản cũ, ví dụ còn sót file `SourceXlsxOpenV_FIX.js`.
+
+Kiểm tra tự động (đều đạt): cú pháp 61 file; 0 tên toàn cục trùng giữa các file; 0 lời gọi tới hàm không tồn tại;
+`clasp status` (clasp 2.4.2): đẩy đúng 64 file app, bỏ qua docs/, tools/, _backup_*;
+test: 122 PASS, 82 NEEDS_LIVE (chưa chạy), 0 test từ PASS sang FAIL; mô phỏng căn ảo/mã căn 17/17.
+
+**Lưu ý trên sheet thật (13/11):** tab MASTER không có cột "Trạng thái" nên trạng thái/cảnh báo từng nguồn không ghi vào MASTER;
+cảnh báo vẫn có trong SYSTEM_EVENT_LOG_V3 (sự kiện MASTER_SOURCE_WARNINGS_B34, hiện ở mục 5 tab BAO_CAO_NGUON) và log Executions.
+
 ## Triển khai
 
-1. Lấy code nhánh `claude/che-do-cuc-cao-giao-viec-1q8c1w` (hoặc file zip em gửi), chép đè vào thư mục app_live. Xóa file cũ `SourceXlsxOpenV_FIX.js` trong app_live (đã đổi tên). `clasp push`.
-2. Trong Apps Script chạy `testQualityFixesV1` => phải thấy `QUALITY_FIXES_PASS_V1`.
+0. **Trước khi push:** `clasp pull` bản live vào một thư mục MỚI và so với commit `ec54041` (bản em nhận ngày 10/11). Nếu live đã có thay đổi sau ngày đó (vd bản V8 của dự án khác), push sẽ ĐÈ MẤT các thay đổi đó - phải gộp trước.
+1. Lấy code nhánh `claude/che-do-cuc-cao-giao-viec-1q8c1w` (hoặc file zip em gửi), chép đè vào thư mục app_live. **Xóa file cũ `SourceXlsxOpenV_FIX.js`** trong app_live (đã đổi tên). `clasp push`.
+2. Trong Apps Script chạy `testQualityFixesV1` => phải thấy `QUALITY_FIXES_PASS_V1` (gồm kiểm bản deploy đúng).
 3. Build Master như bình thường **2 lần**. Xem tab `GHOST_PREVIEW` và cột trạng thái tab MASTER (dòng có ⚠ là nguồn cần xem).
 4. Chạy `showLastBuildTimingB7` và `checkImageFolderC3`, gửi log cho em.
 

@@ -4,6 +4,7 @@
  */
 function testQualityFixesV1() {
   var results = [
+    testDeploymentIntegrityV1(),
     testTabYearPolicyB4(),
     testNamelessPriceColumnsB3()
   ];
@@ -242,4 +243,25 @@ function testColoredCellBusyV1() {
   qualityAssertV1_(issues.length === 1 && issues[0].code === "FREE_COLOR_KEY_IGNORED", "phải báo khóa màu bị bỏ qua");
   qualityAssertV1_(ceFreeColorConfigIssuesV1_("AUTO;NHÓM_MÀU_TRỐNG=Vàng, Xanh lá, #ffff00").length === 0, "tên màu hợp lệ có dấu không bị báo");
   return {success: true, code: "COLORED_CELL_BUSY_PASS_V1"};
+}
+
+/**
+ * Kiểm tra SAU KHI PUSH: đúng bản code mới đang chạy, không bị file cũ đè.
+ * (Apps Script cho phép 2 file trùng tên hàm và lặng lẽ dùng 1 bản - vd còn sót
+ * SourceXlsxOpenV_FIX.js cũ cạnh SourceXlsxOpen.js mới.)
+ */
+function testDeploymentIntegrityV1() {
+  var g = (typeof globalThis !== "undefined") ? globalThis : this;
+  var required = ["beGhostStableReadConfirmV1_", "beGhostFlushV1_", "beResolveSourceVillaIdentitiesV1_",
+    "ceSheetYearForDateB5_", "ceFreeColorConfigIssuesV1_", "ceB6EnabledForConfigV1_", "beIsKnownXlsxSourceV1_",
+    "aiResetBreakerV1", "beB7LogSummaryV1_", "diagnoseCellColorV1", "checkTriggerHandlersV1"];
+  var missing = required.filter(function(n) { return typeof g[n] !== "function"; });
+  qualityAssertV1_(!missing.length, "thiếu hàm của bản mới: " + missing.join(", "));
+  qualityAssertV1_(String(beOpenSourceSpreadsheetV_FIX).indexOf("beIsKnownXlsxSourceV1_") >= 0,
+    "beOpenSourceSpreadsheetV_FIX đang là bản CŨ - hãy xóa file SourceXlsxOpenV_FIX.js rồi push lại");
+  qualityAssertV1_(String(ceReadCalendarCellStateV34_).indexOf("BACKGROUND_NOT_LOADED") >= 0, "ceReadCalendarCellStateV34_ đang là bản cũ");
+  qualityAssertV1_(String(beResolveSourceVillaIdentitiesV1_).indexOf("REVIVED_RETIRED_V1") >= 0, "VillaIdentity đang là bản cũ");
+  qualityAssertV1_(BE_GHOST_V1 && BE_GHOST_V1.STATE_PROPERTY === "BE_GHOST_STATE_V2", "GhostGuard đang là bản cũ");
+  qualityAssertV1_(BE_CONFIG.MASTER_AUTO_RESIZE_COLUMNS === false, "Config.js đang là bản cũ");
+  return {success: true, code: "DEPLOYMENT_INTEGRITY_PASS_V1"};
 }

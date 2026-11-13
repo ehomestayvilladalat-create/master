@@ -110,9 +110,13 @@ function beOpenXlsxAsTempSheetV_FIX_(fileId) {
     return reused;
   }
 
+  // Không giành/nhả khóa nếu lượt chạy này ĐÃ giữ khóa script (build, worker snapshot...):
+  // nhả ở finally sẽ nhả luôn khóa của lượt chạy bên ngoài.
   var lock = LockService.getScriptLock();
   var locked = false;
-  try { locked = lock.tryLock(30000); } catch (ignoreLock) {}
+  var heldOutside = false;
+  try { heldOutside = lock.hasLock(); } catch (ignoreHas) {}
+  if (!heldOutside) { try { locked = lock.tryLock(30000); } catch (ignoreLock) {} }
   try {
     // Lượt chạy khác có thể vừa chuyển đổi xong trong lúc chờ khóa.
     var again = beParseXlsxTmpRecordV1_(props.getProperty(key));

@@ -1751,7 +1751,9 @@ function beWeekdayYearFromValuesB4_(values, month, candidateYears) {
     if (/^(cn|chu nhat|sun|sunday)$/.test(t)) return 0;
     var m = t.match(/^(?:t|thu)\s*([2-7])$/);
     if (m) return Number(m[1]) - 1;
+    // Gồm cả nhãn ngắn hay gặp trong lịch nguồn: "Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy".
     var words = {"thu hai":1,"thu ba":2,"thu tu":3,"thu nam":4,"thu sau":5,"thu bay":6,
+      hai:1,ba:2,tu:3,nam:4,sau:5,bay:6,
       mon:1,monday:1,tue:2,tuesday:2,wed:3,wednesday:3,thu:4,thursday:4,fri:5,friday:5,sat:6,saturday:6};
     return Object.prototype.hasOwnProperty.call(words, t) ? words[t] : -1;
   };
@@ -6251,9 +6253,13 @@ function beApplySourceWarningsB34_(statuses, store, masterRows) {
   });
   Logger.log(JSON.stringify({level:"WARNING", code:"MASTER_SOURCE_WARNINGS_B34", sources:summary.length, detail:summary}));
   if (typeof beEmitSystemEventV30_ === "function") {
+    // Ô Google Sheet tối đa 50.000 ký tự: cắt bớt danh sách nếu quá dài.
+    var payloadSources = summary.slice();
+    while (payloadSources.length > 1 && JSON.stringify(payloadSources).length > 40000) payloadSources.pop();
     beEmitSystemEventV30_("WARNING", "MASTER_SOURCE_WARNINGS_B34", {
       message: summary.length + " nguồn có cảnh báo cấu hình/tên tab",
-      sources: summary
+      sources: payloadSources,
+      truncated: payloadSources.length < summary.length
     });
   }
 }

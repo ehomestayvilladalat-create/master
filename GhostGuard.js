@@ -320,7 +320,9 @@ function beGhostSendAlertV1_(a) {
 function beGhostMutateStateV1_(fn) {
   var lock = LockService.getScriptLock();
   var locked = false;
-  try { locked = lock.tryLock(20000); } catch (ignore) {}
+  var heldOutside = false;
+  try { heldOutside = lock.hasLock(); } catch (ignoreHas) {}
+  if (!heldOutside) { try { locked = lock.tryLock(20000); } catch (ignore) {} }
   try {
     var props = PropertiesService.getScriptProperties();
     var loaded = beGhostLoadStateV1_(props);

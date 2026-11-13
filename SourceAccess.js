@@ -78,7 +78,6 @@ function saGetNoAccessTabV1_() {
     }
 
     saNormalizeNoAccessTabV1_(tab);
-    saRefreshNoAccessMasterRowsV1_(tab);
     return tab;
   } catch (e) {
     Logger.log("[SourceAccess] Error getting NO_ACCESS tab: " + e.message);
@@ -208,6 +207,8 @@ function saSaveNoAccessSourceV1_(masterRow, source, statusValue) {
   try {
     var tab = saGetNoAccessTabV1_();
     if (!tab) return false;
+    // B10: tính lại cột "Dòng MASTER" từ ID - chỉ khi có ghi (hiếm), không phải mỗi lượt đọc.
+    saRefreshNoAccessMasterRowsV1_(tab);
 
     var statusToUse = statusValue || EHOME_SOURCE_ACCESS_V1.STATUS_NO_ACCESS;
     var data = tab.getDataRange().getValues();

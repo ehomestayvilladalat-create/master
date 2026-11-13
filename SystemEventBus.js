@@ -34,9 +34,14 @@ function beEmitSystemEventV30_(level, type, payload) {
     if (extra >= 100) {
       sheet.deleteRows(2, extra);
       cleanupSystemEventsV340_();
-    } else if (extra < 0 && lastRow % 100 === 0) {
-      // Chưa đầy: cứ 100 sự kiện dọn dòng cũ hơn 7 ngày một lần (như cũ).
-      cleanupSystemEventsV340_();
+    } else if (lastRow >= 3) {
+      // Chưa đầy: chỉ dọn khi dòng CŨ NHẤT (dòng 2) đã quá hạn giữ 7 ngày.
+      // Bản cũ chỉ dọn khi số dòng chia hết cho 100 nên log ít dòng không bao giờ được dọn
+      // (thực tế 13/11/2026 log còn dòng từ tháng 8).
+      var oldest = sheet.getRange(2, 1).getValue();
+      var oldestTime = oldest instanceof Date ? oldest.getTime() : new Date(oldest).getTime();
+      var retentionMs = Math.max(1, Number(EHOME_EVENT_V30.RETENTION_DAYS || 7)) * 86400000;
+      if (isFinite(oldestTime) && new Date().getTime() - oldestTime > retentionMs) cleanupSystemEventsV340_();
     }
   } catch (error) {
     Logger.log(JSON.stringify({

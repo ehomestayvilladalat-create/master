@@ -1,4 +1,4 @@
-# Mô phỏng chống căn ảo + mã căn (commit c94a0bb) - 2026-11-11 00:36 +07
+# Mô phỏng chống căn ảo + mã căn - 2026-11-14 01:24 +07
 ok  : build 1: căn C biến mất -> chưa ẩn (chờ lần đọc 2)
 ok  : build lại ngay 10 phút sau -> vẫn chưa ẩn (chưa đủ 6 giờ)
 ok  : build 2: đọc giống -> cho phép ẩn (GHOST_GUARD_STABLE_READS_V1)
